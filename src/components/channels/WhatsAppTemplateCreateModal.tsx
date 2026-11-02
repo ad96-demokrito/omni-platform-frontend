@@ -360,10 +360,12 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
             type: 'HEADER',
             format: headerType,
           };
-          if (mediaUrl) {
+          if (mediaUrl || headerMedia.mediaStorageKey) {
+            // The backend turns the stored file / URL into a Meta upload handle.
             headerComp.example = {
               header_handle: [mediaUrl],
             };
+            if (headerMedia.mediaStorageKey) headerComp.mediaStorageKey = headerMedia.mediaStorageKey;
           }
           components.push(headerComp);
         }
