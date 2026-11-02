@@ -99,7 +99,8 @@ export const NewCampaignPage: React.FC = () => {
           contactsApi.getTags().catch(() => []),
         ]);
         setChannels(channelsData);
-        setFlows(flowsData);
+        const publishedFlows = flowsData.filter((f) => f.status === 'published');
+        setFlows(publishedFlows);
         setContacts(contactsData);
         setAvailableTags(tagsData);
 
@@ -108,9 +109,8 @@ export const NewCampaignPage: React.FC = () => {
           setSelectedChannelId(firstCh.id);
         }
 
-        const publishedFlow = flowsData.find((f) => f.status === 'published') || flowsData[0];
-        if (publishedFlow) {
-          setSelectedFlowId(publishedFlow.id);
+        if (publishedFlows.length > 0) {
+          setSelectedFlowId(publishedFlows[0].id);
         }
       } catch (err) {
         showToast('Failed to load initial data for campaign creation', 'error');
