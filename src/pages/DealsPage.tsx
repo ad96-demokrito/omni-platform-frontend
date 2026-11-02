@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   TrendingUp,
   Plus,
-  DollarSign,
+  IndianRupee,
   User,
   Calendar,
   ChevronRight,
@@ -217,11 +217,11 @@ export const DealsPage: React.FC = () => {
         <Card className="p-4 bg-gradient-to-br from-primary-500 to-primary-600 text-white border-0 shadow-lg">
           <div className="flex items-center justify-between mb-3">
             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-white" />
+              <IndianRupee className="w-5 h-5 text-white" />
             </div>
             <TrendingUp className="w-5 h-5 text-white/70" />
           </div>
-          <p className="text-2xl font-bold">${(totalPipelineValue / 100).toLocaleString('en-US')}</p>
+          <p className="text-2xl font-bold">₹{(totalPipelineValue / 100).toLocaleString('en-IN')}</p>
           <p className="text-xs text-primary-100 mt-0.5">Total Pipeline Value</p>
         </Card>
 
@@ -250,11 +250,11 @@ export const DealsPage: React.FC = () => {
         <Card className="p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
-              <DollarSign className="w-5 h-5" />
+              <IndianRupee className="w-5 h-5" />
             </div>
           </div>
           <p className="text-2xl font-bold text-gray-900">
-            ${((pipelineSummary.find((s) => s.stage === 'Won')?.totalValue || 0) / 100).toLocaleString('en-US')}
+            ₹{((pipelineSummary.find((s) => s.stage === 'Won')?.totalValue || 0) / 100).toLocaleString('en-IN')}
           </p>
           <p className="text-xs text-gray-500 mt-0.5">Won Value</p>
         </Card>
@@ -298,7 +298,7 @@ export const DealsPage: React.FC = () => {
                       </Badge>
                     </div>
                     <p className="text-xs font-semibold text-gray-700">
-                      ${(stageValue / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ₹{(stageValue / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </p>
                   </div>
 
@@ -339,9 +339,9 @@ export const DealsPage: React.FC = () => {
 
                             {/* Deal Value */}
                             <div className="flex items-center gap-1.5">
-                              <DollarSign className="w-4 h-4 text-emerald-600" />
+                              <IndianRupee className="w-4 h-4 text-emerald-600" />
                               <span className="text-sm font-bold text-emerald-700">
-                                ${((Number(deal.value) || 0) / 100).toLocaleString('en-US', {
+                                ₹{((Number(deal.value) || 0) / 100).toLocaleString('en-IN', {
                                   minimumFractionDigits: 2,
                                 })}
                               </span>

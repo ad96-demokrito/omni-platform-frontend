@@ -56,3 +56,17 @@ export function getUserInitials(name?: string | null, email?: string | null): st
   return 'US';
 }
 
+
+export function formatMoney(
+  amount: number | string | null | undefined,
+  currency: string | null | undefined = 'INR',
+  options: Intl.NumberFormatOptions = {}
+): string {
+  const value = Number(amount) || 0;
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: (currency || 'INR').toUpperCase(),
+    maximumFractionDigits: 2,
+    ...options,
+  }).format(value);
+}

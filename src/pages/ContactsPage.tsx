@@ -147,8 +147,9 @@ export const ContactsPage: React.FC = () => {
       setAvailableTags(tagsData);
 
       if (channelsData.length > 0) {
-        if (!newContactChannelId) setNewContactChannelId(channelsData[0].id);
-        if (!importChannelId) setImportChannelId(channelsData[0].id);
+        const defaultChannel = channelsData.find((c) => c.type === 'whatsapp') || channelsData[0];
+        if (!newContactChannelId) setNewContactChannelId(defaultChannel.id);
+        if (!importChannelId) setImportChannelId(defaultChannel.id);
       }
     } catch (err) {
       showToast('Failed to load contacts data', 'error');
@@ -1615,7 +1616,7 @@ export const ContactsPage: React.FC = () => {
                         </Badge>
                       </div>
                       <p className="text-xs font-semibold text-primary-700">
-                        ${((Number(deal.value) || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        ₹{((Number(deal.value) || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
                   ))}

@@ -22,7 +22,7 @@ import {
   Activity,
   Users,
   MessageSquare,
-  DollarSign,
+  IndianRupee,
   ShoppingCart,
   Trash2,
   Info,
@@ -295,11 +295,11 @@ export const AnalyticsPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Commerce Revenue</span>
                     <span className="p-2 bg-indigo-50 rounded-xl text-indigo-600">
-                      <DollarSign className="w-5 h-5" />
+                      <IndianRupee className="w-5 h-5" />
                     </span>
                   </div>
                   <p className="text-2xl font-black text-gray-900 mt-2">
-                    ${((overview.totalRevenue || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    ₹{((overview.totalRevenue || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </p>
                   <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
                     <ShoppingCart className="w-3.5 h-3.5" />

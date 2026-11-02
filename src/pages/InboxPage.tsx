@@ -1088,7 +1088,7 @@ export const InboxPage: React.FC = () => {
                         </Badge>
                       </div>
                       <p className="text-xs font-semibold text-primary-700">
-                        ${((Number(deal.value) || 0) / 100).toLocaleString('en-US')}
+                        ₹{((Number(deal.value) || 0) / 100).toLocaleString('en-IN')}
                       </p>
                     </div>
                   ))

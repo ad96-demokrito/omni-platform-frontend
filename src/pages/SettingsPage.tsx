@@ -30,7 +30,7 @@ import {
   ArrowRight,
   ExternalLink,
   Calendar,
-  DollarSign,
+  IndianRupee,
 } from 'lucide-react';
 import {
   teamApi,
@@ -62,7 +62,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { Tabs, Spinner } from '../components/common/Tabs';
-import { formatRelativeTime, getUserInitials } from '../lib/utils';
+import { formatMoney, formatRelativeTime, getUserInitials } from '../lib/utils';
 
 export const SettingsPage: React.FC = () => {
   const { user, updateProfile, refreshProfile } = useAuth();
@@ -1233,14 +1233,14 @@ export const SettingsPage: React.FC = () => {
 
                           <div>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-3xl font-extrabold text-gray-900">${displayPrice}</span>
+                              <span className="text-3xl font-extrabold text-gray-900">{formatMoney(displayPrice, plan.currency, { maximumFractionDigits: 0 })}</span>
                               <span className="text-xs text-gray-500">
                                 {displayPrice === 0 ? 'forever' : billingCycle === 'yearly' ? '/ year' : '/ month'}
                               </span>
                             </div>
                             {billingCycle === 'yearly' && displayPrice > 0 && (
                               <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
-                                Equivalent to ${(displayPrice / 12).toFixed(1)}/mo (2 months free)
+                                Equivalent to {formatMoney(displayPrice / 12, plan.currency, { maximumFractionDigits: 0 })}/mo (2 months free)
                               </p>
                             )}
                           </div>
@@ -1338,7 +1338,7 @@ export const SettingsPage: React.FC = () => {
                                   <Badge variant="purple">{inv.planName}</Badge>
                                 </td>
                                 <td className="px-5 py-3.5 font-semibold text-gray-900">
-                                  ${inv.amount.toLocaleString()} {inv.currency}
+                                  {formatMoney(inv.amount, inv.currency)}
                                 </td>
                                 <td className="px-5 py-3.5 capitalize text-gray-600">
                                   {inv.billingCycle}
@@ -1743,7 +1743,7 @@ export const SettingsPage: React.FC = () => {
                     >
                       <div className="flex justify-between items-center mb-1">
                         <span className="font-bold text-gray-900 text-sm">Monthly</span>
-                        <span className="font-bold text-gray-900">${priceMonthly}/mo</span>
+                        <span className="font-bold text-gray-900">{formatMoney(priceMonthly, selectedPlanForUpgrade.currency, { maximumFractionDigits: 0 })}/mo</span>
                       </div>
                       <p className="text-[11px] text-gray-500">Billed monthly, cancel anytime</p>
                     </button>
@@ -1762,9 +1762,9 @@ export const SettingsPage: React.FC = () => {
                       </span>
                       <div className="flex justify-between items-center mb-1">
                         <span className="font-bold text-gray-900 text-sm">Annual</span>
-                        <span className="font-bold text-emerald-700">${priceYearly}/yr</span>
+                        <span className="font-bold text-emerald-700">{formatMoney(priceYearly, selectedPlanForUpgrade.currency, { maximumFractionDigits: 0 })}/yr</span>
                       </div>
-                      <p className="text-[11px] text-gray-500">2 months free (${(priceYearly / 12).toFixed(1)}/mo)</p>
+                      <p className="text-[11px] text-gray-500">2 months free ({formatMoney(priceYearly / 12, selectedPlanForUpgrade.currency, { maximumFractionDigits: 0 })}/mo)</p>
                     </button>
                   </div>
                 </div>
@@ -1774,7 +1774,7 @@ export const SettingsPage: React.FC = () => {
                   <div className="font-semibold text-gray-900 flex items-center justify-between">
                     <span>Workspace Quota Entitlements:</span>
                     <span className="text-primary-700 font-bold text-sm">
-                      {isFree ? 'FREE' : `$${currentAmount} / ${billingCycle}`}
+                      {isFree ? 'FREE' : `${formatMoney(currentAmount, selectedPlanForUpgrade.currency)} / ${billingCycle}`}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-gray-600 text-[11px]">
@@ -1828,7 +1828,7 @@ export const SettingsPage: React.FC = () => {
                         }`}
                       >
                         <div className="font-bold text-gray-900 text-xs flex items-center gap-1">
-                          <DollarSign className="w-3.5 h-3.5 text-blue-600" />
+                          <IndianRupee className="w-3.5 h-3.5 text-blue-600" />
                           <span>Razorpay</span>
                         </div>
                         <p className="text-[10px] text-gray-500 mt-0.5">UPI & Netbanking</p>
@@ -1873,7 +1873,7 @@ export const SettingsPage: React.FC = () => {
                       'Activate Free Tier'
                     ) : (
                       <>
-                        <span>Proceed to Pay ${currentAmount}</span>
+                        <span>Proceed to Pay {formatMoney(currentAmount, selectedPlanForUpgrade.currency)}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
@@ -1907,7 +1907,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Total Due:</span>
-                  <span className="font-bold text-gray-900">${checkoutSession.amount} {checkoutSession.currency}</span>
+                  <span className="font-bold text-gray-900">{formatMoney(checkoutSession.amount, checkoutSession.currency)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Session ID:</span>
@@ -1990,7 +1990,7 @@ export const SettingsPage: React.FC = () => {
                     <div>
                       <span className="text-gray-500 block">Amount Paid:</span>
                       <span className="font-bold text-gray-900">
-                        ${paymentSuccessResult.payment.amount} {paymentSuccessResult.payment.currency}
+                        {formatMoney(paymentSuccessResult.payment.amount, paymentSuccessResult.payment.currency)}
                       </span>
                     </div>
                     <div>
@@ -2139,7 +2139,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-gray-400 block text-[10px] uppercase">Amount Paid</span>
-                  <span className="font-bold text-gray-900">${selectedInvoiceForModal.amount} {selectedInvoiceForModal.currency}</span>
+                  <span className="font-bold text-gray-900">{formatMoney(selectedInvoiceForModal.amount, selectedInvoiceForModal.currency)}</span>
                 </div>
                 <div>
                   <span className="text-gray-400 block text-[10px] uppercase">Billing Cycle</span>

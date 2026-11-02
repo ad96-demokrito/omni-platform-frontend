@@ -151,7 +151,7 @@ export const DashboardPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Deals Pipeline</p>
               <h3 className="text-2xl font-bold text-gray-900 mt-2">
-                ${(totalPipelineValue / 100).toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                ₹{(totalPipelineValue / 100).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
               </h3>
               <p className="text-xs text-amber-600 font-medium mt-1">Across all CRM stages</p>
             </div>
@@ -288,7 +288,7 @@ export const DashboardPage: React.FC = () => {
                         {stage.stage} ({stage.count} deals)
                       </span>
                       <span className="font-bold text-gray-900">
-                        ${((Number(stage.totalValue) || 0) / 100).toLocaleString('en-US')}
+                        ₹{((Number(stage.totalValue) || 0) / 100).toLocaleString('en-IN')}
                       </span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
