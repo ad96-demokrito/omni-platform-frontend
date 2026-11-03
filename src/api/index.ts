@@ -306,7 +306,11 @@ export const campaignsApi = {
     definition?: any;
   }) => apiClient.post<Campaign>('/campaigns', data),
 
-  send: (id: string) => apiClient.post<{ sent: number; failed: number }>(`/campaigns/${id}/send`),
+  /** Broadcast/flow: sends now. Drip: starts the sequence (`started`, `scheduled` recipients). */
+  send: (id: string) =>
+    apiClient.post<{ sent: number; failed: number; started?: boolean; scheduled?: number }>(
+      `/campaigns/${id}/send`
+    ),
 
   sendBroadcast: (id: string) => apiClient.post<{ sent: number; failed: number }>(`/campaigns/${id}/send`),
 

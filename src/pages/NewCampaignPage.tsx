@@ -81,8 +81,8 @@ export const NewCampaignPage: React.FC = () => {
 
   // Drip fields
   const [dripSteps, setDripSteps] = useState<DripStep[]>([
-    { stepNumber: 1, delayHours: 0, message: 'Hi {{name}}, welcome to our platform!' },
-    { stepNumber: 2, delayHours: 24, message: 'Hi {{name}}, just checking in to see if you had any questions.' },
+    { stepNumber: 1, delayHours: 0, text: 'Hi {{name}}, welcome to our platform!' },
+    { stepNumber: 2, delayHours: 24, text: 'Hi {{name}}, just checking in to see if you had any questions.' },
   ]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -243,7 +243,7 @@ export const NewCampaignPage: React.FC = () => {
     const nextStepNum = dripSteps.length + 1;
     setDripSteps([
       ...dripSteps,
-      { stepNumber: nextStepNum, delayHours: 48, message: `Follow-up step #${nextStepNum}` },
+      { stepNumber: nextStepNum, delayHours: 48, text: `Follow-up step #${nextStepNum}` },
     ]);
   };
 
@@ -310,6 +310,14 @@ export const NewCampaignPage: React.FC = () => {
       return;
     }
 
+    if (campaignType === 'drip') {
+      const emptyStep = dripSteps.findIndex((step) => !step.text.trim());
+      if (emptyStep >= 0) {
+        showToast(`Drip step ${emptyStep + 1} needs a message`, 'error');
+        return;
+      }
+    }
+
     if (targetedContacts.length === 0) {
       showToast('No contacts match the selected audience criteria. Add contacts or select different tags.', 'error');
       return;
@@ -338,7 +346,9 @@ export const NewCampaignPage: React.FC = () => {
           definitionPayload = { text: broadcastMessage.trim(), tags: selectedTags };
         }
       } else {
-        definitionPayload = { steps: dripSteps };
+        definitionPayload = {
+          steps: dripSteps.map(({ delayHours, text }) => ({ delayHours, text: text.trim() })),
+        };
       }
 
       await campaignsApi.create({
@@ -356,7 +366,6 @@ export const NewCampaignPage: React.FC = () => {
           campaignType === 'broadcast' && broadcastSubtype === 'text'
             ? broadcastMessage.trim()
             : undefined,
-        steps: campaignType === 'drip' ? dripSteps : undefined,
         definition: definitionPayload,
       });
 
@@ -951,8 +960,8 @@ export const NewCampaignPage: React.FC = () => {
                   <textarea
                     rows={2}
                     placeholder="Enter message for this drip step..."
-                    value={step.message}
-                    onChange={(e) => handleUpdateDripStep(index, 'message', e.target.value)}
+                    value={step.text}
+                    onChange={(e) => handleUpdateDripStep(index, 'text', e.target.value)}
                     className="w-full rounded-xl border border-gray-200 p-2.5 text-xs bg-white focus:outline-none focus:border-purple-500"
                     required
                   />

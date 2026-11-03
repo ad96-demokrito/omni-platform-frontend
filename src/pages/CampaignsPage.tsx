@@ -54,19 +54,27 @@ export const CampaignsPage: React.FC = () => {
     loadCampaigns();
   }, []);
 
-  const handleSendCampaign = async (campaignId: string) => {
+  const handleSendCampaign = async (campaign: Campaign) => {
+    const isDrip = campaign.type === 'drip';
     const ok = await confirm({
-      title: 'Execute Broadcast Campaign',
-      message: 'Are you sure you want to execute and send this campaign now?',
-      confirmText: 'Send Broadcast',
+      title: isDrip ? 'Start Drip Sequence' : 'Execute Broadcast Campaign',
+      message: isDrip
+        ? 'Start this drip sequence now? The first message goes out shortly (after its delay, if one is set) and the remaining steps follow on their schedule.'
+        : 'Are you sure you want to execute and send this campaign now?',
+      confirmText: isDrip ? 'Start Drip' : 'Send Broadcast',
       variant: 'primary',
     });
     if (!ok) return;
 
-    setSendingId(campaignId);
+    setSendingId(campaign.id);
     try {
-      const res = await campaignsApi.send(campaignId);
-      showToast(`Campaign sent successfully! (${res.sent} sent, ${res.failed} failed)`, 'success');
+      const res = await campaignsApi.send(campaign.id);
+      showToast(
+        res.started
+          ? `Drip started for ${res.scheduled ?? 0} recipients`
+          : `Campaign sent successfully! (${res.sent} sent, ${res.failed} failed)`,
+        'success'
+      );
       loadCampaigns();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to send campaign', 'error');
@@ -356,10 +364,10 @@ export const CampaignsPage: React.FC = () => {
                         variant="primary"
                         size="sm"
                         isLoading={sendingId === campaign.id}
-                        onClick={() => handleSendCampaign(campaign.id)}
+                        onClick={() => handleSendCampaign(campaign)}
                         icon={<Send className="w-3.5 h-3.5" />}
                       >
-                        Send Now
+                        {campaign.type === 'drip' ? 'Start Drip' : 'Send Now'}
                       </Button>
                     )}
                     <button
@@ -407,7 +415,7 @@ export const CampaignsPage: React.FC = () => {
                             <Badge variant="outline" size="sm">
                               Step {idx + 1}
                             </Badge>
-                            <span className="line-clamp-1 flex-1">{step.text || step.message}</span>
+                            <span className="line-clamp-1 flex-1">{step.text}</span>
                             <span className="text-[10px] text-gray-400 font-mono">+{step.delayHours || 0}h</span>
                           </div>
                         ))}

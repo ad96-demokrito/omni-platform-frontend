@@ -571,8 +571,7 @@ export interface FlowCampaignDefinition {
 export interface DripStep {
   stepNumber?: number;
   delayHours: number;
-  message?: string;
-  text?: string;
+  text: string;
 }
 
 export interface DripDefinition {

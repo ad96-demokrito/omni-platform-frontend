@@ -155,10 +155,13 @@ export const CampaignDetailsPage: React.FC = () => {
 
   const handleSendCampaign = async () => {
     if (!id) return;
+    const isDrip = campaign?.type === 'drip';
     const ok = await confirm({
-      title: 'Execute Broadcast Campaign',
-      message: 'Are you sure you want to execute and send this campaign now to all targeted recipients?',
-      confirmText: 'Send Broadcast',
+      title: isDrip ? 'Start Drip Sequence' : 'Execute Broadcast Campaign',
+      message: isDrip
+        ? 'Start this drip sequence now? The first message goes out shortly (after its delay, if one is set) and the remaining steps follow on their schedule.'
+        : 'Are you sure you want to execute and send this campaign now to all targeted recipients?',
+      confirmText: isDrip ? 'Start Drip' : 'Send Broadcast',
       variant: 'primary',
     });
     if (!ok) return;
@@ -166,7 +169,12 @@ export const CampaignDetailsPage: React.FC = () => {
     setIsSending(true);
     try {
       const res = await campaignsApi.send(id);
-      showToast(`Campaign sent successfully! (${res.sent} sent, ${res.failed} failed)`, 'success');
+      showToast(
+        res.started
+          ? `Drip started for ${res.scheduled ?? 0} recipients`
+          : `Campaign sent successfully! (${res.sent} sent, ${res.failed} failed)`,
+        'success'
+      );
       await loadData(false);
       await loadRecipients();
     } catch (err: any) {
@@ -396,7 +404,7 @@ export const CampaignDetailsPage: React.FC = () => {
               onClick={handleSendCampaign}
               icon={<Send className="w-3.5 h-3.5" />}
             >
-              Send Now
+              {campaign.type === 'drip' ? 'Start Drip' : 'Send Now'}
             </Button>
           )}
 
@@ -676,7 +684,7 @@ export const CampaignDetailsPage: React.FC = () => {
                         </span>
                       </div>
                       <p className="text-xs text-gray-600 italic bg-white p-2.5 rounded-lg border border-gray-100">
-                        "{step.text || step.message}"
+                        "{step.text}"
                       </p>
                     </div>
                   );
