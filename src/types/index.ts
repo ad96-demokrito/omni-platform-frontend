@@ -633,6 +633,8 @@ export interface CampaignRecipient {
   status: CampaignRecipientStatus;
   current_step: number;
   currentStep?: number;
+  /** Drip only: number of steps in the sequence */
+  steps_total?: number;
   next_send_at: string;
   nextSendAt?: string;
   last_error: string | null;
@@ -681,6 +683,19 @@ export interface CampaignAnalytics {
   metrics: CampaignMetrics;
   statusBreakdown: Array<{ status: string; count: number }>;
   stepBreakdown: Array<{ step: number; count: number }>;
+  /** Drip only: per step, how many recipients received it, are waiting for it, or failed on it */
+  dripProgress?: Array<{ stepIndex: number; sent: number; waiting: number; failed: number }>;
+  /** Drip only: total step messages accepted by the provider across all recipients */
+  messagesSent?: number;
+  /** Drip only: heartbeat of the background scheduler that sends the steps */
+  scheduler?: {
+    intervalMs: number;
+    lastRunAt: string | null;
+    lastSuccessAt: string | null;
+    lastError: string | null;
+    lastProcessed: number;
+    lastFailed: number;
+  };
   /** Why messages failed, most common first */
   failureReasons?: Array<{ errorCode: string | null; reason: string; count: number }>;
 }

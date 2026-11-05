@@ -48,6 +48,7 @@ import { Spinner } from '../components/common/Tabs';
 import { Modal } from '../components/common/Modal';
 import { formatDateTime, cn } from '../lib/utils';
 import { DeliveryFailureNote } from '../components/common/DeliveryFailureNote';
+import { DripSchedulerNote } from '../components/campaigns/DripSchedulerNote';
 import { getDeliveryFailure } from '../utils/whatsapp-errors';
 import {
   resolveTemplateMessage,
@@ -299,6 +300,10 @@ export const CampaignDetailsPage: React.FC = () => {
 
   const totalPages = Math.ceil(recipientsTotal / limit) || 1;
 
+  // Drips keep recipients 'pending' between steps, so the generic queue/delivery wording reads
+  // as "nothing was sent". These labels describe what a drip is actually doing.
+  const isDrip = campaign.type === 'drip';
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Header & Breadcrumb */}
@@ -437,46 +442,73 @@ export const CampaignDetailsPage: React.FC = () => {
         {/* Delivery Rate */}
         <Card className="p-4 bg-white border border-gray-100 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Delivery Rate</span>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              {isDrip ? 'Sequence Completed' : 'Delivery Rate'}
+            </span>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-emerald-600">{metrics.deliveryRate}%</span>
-            <span className="text-xs text-gray-400">confirmed delivered</span>
+            <span className="text-2xl font-bold text-emerald-600">
+              {isDrip ? completedPercent : metrics.deliveryRate}%
+            </span>
+            <span className="text-xs text-gray-400">{isDrip ? 'finished all steps' : 'confirmed delivered'}</span>
           </div>
           <div className="w-full bg-gray-100 h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${metrics.deliveryRate}%` }} />
+            <div
+              className="bg-emerald-500 h-full rounded-full"
+              style={{ width: `${isDrip ? completedPercent : metrics.deliveryRate}%` }}
+            />
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">{metrics.acceptedRate}% accepted by provider</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {isDrip
+              ? `${metrics.completedCount} of ${metrics.totalRecipients} contacts completed`
+              : `${metrics.acceptedRate}% accepted by provider`}
+          </p>
         </Card>
 
         {/* Sent & Delivered */}
         <Card className="p-4 bg-white border border-gray-100 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Delivered</span>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              {isDrip ? 'Messages Sent' : 'Delivered'}
+            </span>
             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-indigo-600">{metrics.deliveredTotal.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-indigo-600">
+            {(isDrip ? analytics?.messagesSent ?? 0 : metrics.deliveredTotal).toLocaleString()}
+          </div>
           <p className="text-[11px] text-gray-400 mt-1">
-            {metrics.readCount} read • {metrics.sentCount} sent, awaiting receipt
-            {metrics.completedCount > 0 && ` • ${metrics.completedCount} completed`}
+            {isDrip ? (
+              'Step messages accepted by WhatsApp. Delivery receipts are not tracked for drips.'
+            ) : (
+              <>
+                {metrics.readCount} read • {metrics.sentCount} sent, awaiting receipt
+                {metrics.completedCount > 0 && ` • ${metrics.completedCount} completed`}
+              </>
+            )}
           </p>
         </Card>
 
         {/* In Queue / Pending */}
         <Card className="p-4 bg-white border border-gray-100 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">In Queue</span>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              {isDrip ? 'Waiting for Next Step' : 'In Queue'}
+            </span>
             <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <Clock className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl font-bold text-amber-600">{metrics.pendingCount.toLocaleString()}</div>
-          <p className="text-[11px] text-gray-400 mt-1">{metrics.pendingRate}% waiting or scheduled</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {isDrip
+              ? 'Contacts with a step still scheduled (earlier steps may already be sent)'
+              : `${metrics.pendingRate}% waiting or scheduled`}
+          </p>
         </Card>
 
         {/* Not delivered */}
@@ -654,33 +686,39 @@ export const CampaignDetailsPage: React.FC = () => {
           )}
 
           {/* Drip Step Breakdown (if drip campaign) */}
-          {campaign.type === 'drip' && analytics?.stepBreakdown && (
+          {campaign.type === 'drip' && analytics?.dripProgress && (
             <Card className="p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-purple-600" />
-                <h3 className="text-sm font-bold text-gray-900">Drip Sequence Step Progression</h3>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Repeat className="w-4 h-4 text-purple-600" />
+                  <h3 className="text-sm font-bold text-gray-900">Drip Sequence Step Progression</h3>
+                </div>
+                {analytics.scheduler && <DripSchedulerNote scheduler={analytics.scheduler} />}
               </div>
               <div className="space-y-3">
                 {(def.steps || []).map((step: any, idx: number) => {
                   const stepNum = idx + 1;
-                  const stat = analytics.stepBreakdown.find((s) => s.step === stepNum);
-                  const count = stat ? stat.count : 0;
-                  const stepPercent =
-                    metrics.totalRecipients > 0 ? Math.round((count / metrics.totalRecipients) * 100) : 0;
+                  const progress = analytics.dripProgress?.find((s) => s.stepIndex === idx);
+                  const sent = progress?.sent ?? 0;
+                  const waiting = progress?.waiting ?? 0;
+                  const failedCount = progress?.failed ?? 0;
 
                   return (
                     <div key={idx} className="p-3.5 rounded-xl border border-gray-100 bg-gray-50/50 space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-2">
                           <Badge variant="purple" size="sm">
                             Step {stepNum}
                           </Badge>
                           <span className="text-xs font-bold text-gray-800">
-                            +{step.delayHours || 0} Hours Delay
+                            {idx === 0 && !step.delayHours
+                              ? 'Sent right after start'
+                              : `+${step.delayHours || 0} hours after ${idx === 0 ? 'start' : 'the previous step'}`}
                           </span>
                         </div>
                         <span className="text-xs font-semibold text-purple-700">
-                          {count} recipients ({stepPercent}%)
+                          {sent} sent · {waiting} waiting
+                          {failedCount > 0 && ` · ${failedCount} failed`}
                         </span>
                       </div>
                       <p className="text-xs text-gray-600 italic bg-white p-2.5 rounded-lg border border-gray-100">
@@ -980,7 +1018,11 @@ export const CampaignDetailsPage: React.FC = () => {
                               <CheckCircle2 className="w-3 h-3" />
                             )}
                             {rec.status === 'sent' && <Send className="w-3 h-3" />}
-                            {rec.status}
+                            {campaign.type === 'drip' && rec.status === 'pending'
+                              ? rec.current_step > 0
+                                ? `Waiting for step ${rec.current_step + 1}`
+                                : 'Starting'
+                              : rec.status}
                           </Badge>
                         )}
                       </td>
@@ -988,15 +1030,37 @@ export const CampaignDetailsPage: React.FC = () => {
                       {/* Drip Step */}
                       {campaign.type === 'drip' && (
                         <td className="py-3 px-4">
-                          <Badge variant="outline" size="sm">
-                            Step {rec.current_step}
+                          <Badge
+                            variant="outline"
+                            size="sm"
+                            title={
+                              rec.current_step > 0
+                                ? `Step ${rec.current_step} sent ${formatDateTime(rec.updated_at)}`
+                                : 'No step sent yet'
+                            }
+                          >
+                            {rec.status === 'completed' && rec.steps_total
+                              ? `Sent ${rec.steps_total} of ${rec.steps_total}`
+                              : `Sent ${rec.current_step}${rec.steps_total ? ` of ${rec.steps_total}` : ''}`}
                           </Badge>
                         </td>
                       )}
 
                       {/* Timestamp */}
                       <td className="py-3 px-4 text-gray-600">
-                        {rec.next_send_at ? formatDateTime(rec.next_send_at) : formatDateTime(rec.updated_at)}
+                        {campaign.type === 'drip' && rec.status === 'pending' && (
+                          <span className="block text-[10px] uppercase tracking-wide text-gray-400">
+                            Next message
+                          </span>
+                        )}
+                        {campaign.type === 'drip' && rec.status === 'completed' && (
+                          <span className="block text-[10px] uppercase tracking-wide text-gray-400">Finished</span>
+                        )}
+                        {campaign.type === 'drip' && rec.status === 'pending'
+                          ? formatDateTime(rec.next_send_at)
+                          : rec.next_send_at && campaign.type !== 'drip'
+                          ? formatDateTime(rec.next_send_at)
+                          : formatDateTime(rec.updated_at)}
                       </td>
 
                       {/* Diagnostic Errors */}
