@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { webchatVisitorApi } from '../../api';
 import { MEDIA_ACCEPT, validateMediaFile } from '../../utils/media-limits';
-import type { PublicWidgetConfig, VisitorSessionInitResponse, Message } from '../../types';
+import type { PublicWidgetConfig, VisitorSessionInitResponse, VisitorHandoffState, Message } from '../../types';
 
 export interface WebchatWidgetProps {
   widgetKey?: string;
@@ -61,6 +61,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [agentTyping, setAgentTyping] = useState(false);
+  const [handoff, setHandoff] = useState<VisitorHandoffState>({ state: 'bot', agentFirstName: null });
 
   // Visitor Info Form (if required)
   const [showInfoForm, setShowInfoForm] = useState(false);
@@ -216,6 +217,24 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
     }
   }, [config, session, widgetKey, mode, initSession]);
 
+  // Who is answering right now. Live changes arrive over the socket (conversation:agent); this loads
+  // the current state once when the session starts (e.g. a visitor returning to a handed-off chat).
+  useEffect(() => {
+    if (!token || mode === 'preview') return;
+    let cancelled = false;
+    webchatVisitorApi
+      .getMessages(token)
+      .then((res) => {
+        if (!cancelled && res.handoff) setHandoff(res.handoff);
+      })
+      .catch(() => {
+        // Cosmetic header text; the socket event or the next load corrects it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, mode]);
+
   // --------------------------------------------------------------------------
   // 3. Setup Real-time WebSocket Connection
   // --------------------------------------------------------------------------
@@ -289,6 +308,15 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                   typingTimeoutRef.current = setTimeout(() => {
                     setAgentTyping(false);
                   }, 4000);
+                }
+              } else if (data.event === 'conversation:agent') {
+                // Who is answering: the bot, "connecting to an agent", or an agent's first name.
+                const next = data.data;
+                if (next && (next.state === 'bot' || next.state === 'waiting' || next.state === 'active')) {
+                  setHandoff({
+                    state: next.state,
+                    agentFirstName: typeof next.agentFirstName === 'string' ? next.agentFirstName : null,
+                  });
                 }
               } else if (data.event === 'conversation:status') {
                 if (data.data?.messageId && data.data?.status) {
@@ -596,7 +624,15 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                 }`}
               />
               <p className="text-xs text-white/90 truncate leading-none">
-                {isOnline ? config.subtitle || 'Typically replies in minutes' : 'Currently Offline'}
+                {handoff.state === 'waiting'
+                  ? 'Connecting you to an agent…'
+                  : handoff.state === 'active'
+                    ? handoff.agentFirstName
+                      ? `You are chatting with ${handoff.agentFirstName}`
+                      : 'You are chatting with our team'
+                    : isOnline
+                      ? config.subtitle || 'Typically replies in minutes'
+                      : 'Currently Offline'}
               </p>
             </div>
           </div>
@@ -741,6 +777,8 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
             const mediaUrl =
               msg.mediaUrl || (typeof msg.content === 'object' ? msg.content?.mediaUrl : null) || null;
             const attachmentName = typeof msg.content === 'object' ? msg.content?.filename : undefined;
+            // A reply written by a person (not the flow) gets the agent's name and initial.
+            const isHumanReply = !isVisitor && msg.senderType === 'agent';
             // Uploads without a caption carry no text; "[Image]"-style placeholders are not for display.
             const hasMedia = Boolean(mediaUrl);
             const buttons =
@@ -760,10 +798,15 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                 >
                   {!isVisitor && config.showAgentAvatar && (
                     <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0 text-xs shadow-sm mb-1"
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0 text-xs font-semibold shadow-sm mb-1"
                       style={{ backgroundColor: primaryColor }}
+                      title={isHumanReply && handoff.agentFirstName ? handoff.agentFirstName : undefined}
                     >
-                      <Bot className="w-3.5 h-3.5" />
+                      {isHumanReply && handoff.agentFirstName ? (
+                        handoff.agentFirstName.charAt(0).toUpperCase()
+                      ) : (
+                        <Bot className="w-3.5 h-3.5" />
+                      )}
                     </div>
                   )}
 

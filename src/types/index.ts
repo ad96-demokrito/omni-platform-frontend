@@ -230,6 +230,38 @@ export interface ImportContactsResult {
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
 /** A support team conversations can be routed to (e.g. "Support", "Sales"). */
+/** Workspace routing settings. */
+export interface TeamSettings {
+  /** When on, a flow hand-off goes to the least busy agent instead of waiting in Pending. */
+  autoAssignEnabled: boolean;
+}
+
+/** What a webchat visitor may know about who is answering them. */
+export interface VisitorHandoffState {
+  state: 'bot' | 'waiting' | 'active';
+  agentFirstName: string | null;
+}
+
+/** Counts for the sidebar badge. */
+export interface ConversationCounts {
+  pending: number;
+  unassigned: number;
+  mine: number;
+  /** Pending cases for this user: assigned to them, or waiting with no agent in no team / one of their teams. */
+  waitingForMe: number;
+}
+
+/** Payload of the `conversation:handoff` realtime event. */
+export interface HandoffEvent {
+  conversationId: string;
+  contactName: string | null;
+  reason: string | null;
+  priority: HandoffPriority;
+  assignedAgentUserId: string | null;
+  assignedTeamId: string | null;
+  handoffAt: string | null;
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -243,6 +275,7 @@ export interface ConversationListParams {
   status?: ConversationStatus;
   /** 'me', 'unassigned' or a user id */
   assignedTo?: string;
+  /** A team id, or 'mine' for any team the caller belongs to. */
   teamId?: string;
 }
 
@@ -275,6 +308,15 @@ export interface Conversation {
   assignedAgentName?: string | null;
   assignedTeamId?: string | null;
   assignedTeamName?: string | null;
+  /** True while a human owns the case; the flow engine stays out of it. */
+  botPaused?: boolean;
+  /** Set when a flow handed the case to a human. */
+  handoffAt?: string | null;
+  handoffReason?: string | null;
+  handoffPriority?: HandoffPriority | null;
+  handoffFlowName?: string | null;
+  /** Variables the flow collected; only present on the single-conversation detail response. */
+  handoffContext?: Record<string, string | number | boolean> | null;
   status: ConversationStatus;
   lastMessageAt?: string | null;
   last_message_at?: string | null;
@@ -476,9 +518,27 @@ export interface IntentRouterNode {
   position?: NodePosition;
 }
 
+export type HandoffPriority = 'normal' | 'high' | 'urgent';
+/** 'default' follows the workspace auto-assign switch; the others override it for this node. */
+export type HandoffAssignMode = 'default' | 'auto' | 'none';
+
 export interface HandoffNode {
   id: string;
   type: 'handoff';
+  /** Support team the case is routed to (also the pool for auto-assign). */
+  teamId?: string;
+  /** A specific agent; always wins over auto-assign. */
+  agentUserId?: string;
+  assignMode?: HandoffAssignMode;
+  /** Sent to the customer at hand-off; supports {{variables}}. */
+  customerMessage?: string;
+  /** Shown to agents in the inbox. */
+  reason?: string;
+  priority?: HandoffPriority;
+  /** Resume the bot if nobody has taken the case after this many minutes (0 = never). */
+  timeoutMinutes?: number;
+  /** Sent to the customer when the timeout resumes the bot. */
+  timeoutMessage?: string;
   ports?: NodePort[];
   position?: NodePosition;
 }

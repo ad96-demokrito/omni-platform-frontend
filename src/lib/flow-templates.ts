@@ -106,6 +106,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         {
           id: 'node_8',
           type: 'handoff',
+          customerMessage: 'Connecting you with our sales team. One moment please.',
+          reason: 'Customer wants a personalised quote',
           position: { x: 480, y: 900 },
         },
         {
@@ -191,6 +193,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         {
           id: 'node_7',
           type: 'handoff',
+          customerMessage: 'Connecting you to one of our support agents. One moment please.',
+          reason: 'Customer needs help from a person',
           position: { x: 600, y: 600 },
         },
         {
@@ -300,6 +304,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         {
           id: 'node_8',
           type: 'handoff',
+          customerMessage: 'Connecting you to one of our agents. One moment please.',
+          reason: 'Customer asked to speak to a person',
           position: { x: 420, y: 900 },
         },
       ],
@@ -380,6 +386,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         {
           id: 'node_7',
           type: 'handoff',
+          customerMessage: 'A specialist will take it from here. One moment please.',
+          reason: 'Lead needs a personal follow-up',
           position: { x: 100, y: 880 },
         },
         {
@@ -480,6 +488,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         {
           id: 'node_7',
           type: 'handoff',
+          customerMessage: 'Let me connect you to one of our agents who can help further.',
+          reason: 'The AI assistant could not resolve the question',
           position: { x: 700, y: 680 },
         },
         {

@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { realtimeClient, ConnectionStatus } from '../lib/socket';
 import { apiClient } from '../api/client';
-import type { AppNotification, NotificationType, Message, Conversation } from '../types';
+import type { AppNotification, NotificationType, Message, Conversation, HandoffEvent } from '../types';
 
 interface NotificationContextType {
   notifications: AppNotification[];
@@ -287,8 +287,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!msg) return;
 
       const direction = msg.direction || (msg as any).senderType;
-      // Trigger notification alert only on inbound messages from customers
-      if (direction === 'inbound' || (!msg.senderUserId && !(msg as any).sender_user_id)) {
+      // Alert only for messages from customers. Bot replies have no sender user either, so the sender
+      // alone cannot tell them apart from a customer; the direction can.
+      if (direction === 'inbound') {
         const convId = msg.conversationId || (msg as any).conversation_id;
         const previewText = msg.text || (msg.type !== 'text' ? `Sent an attachment (${msg.type})` : 'New incoming message');
 
@@ -319,11 +320,39 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     );
 
+    // 2b. Human hand-off: a flow handed a chat to people. The server already targets the right agents
+    // (the assignee, else the team), so viewers are the only ones to filter out here.
+    const unbindHandoff = realtimeClient.on<HandoffEvent>('conversation:handoff', (evt) => {
+      const data = evt.data;
+      if (!data?.conversationId || user.role === 'viewer') return;
+
+      const who = data.contactName || 'A customer';
+      const isUrgent = data.priority === 'urgent' || data.priority === 'high';
+      const assignedToMe =
+        !!data.assignedAgentUserId &&
+        (data.assignedAgentUserId === user.id || data.assignedAgentUserId === (user as any).userId);
+      addNotification({
+        type: 'conversation',
+        title: assignedToMe
+          ? 'Chat assigned to you'
+          : isUrgent
+            ? `${data.priority === 'urgent' ? 'Urgent' : 'High priority'}: needs a human`
+            : 'Needs a human',
+        body: data.reason ? `${who}: ${data.reason}` : `${who} was handed off to your team.`,
+        link: `/inbox?id=${data.conversationId}`,
+        meta: { conversationId: data.conversationId, priority: data.priority },
+      });
+    });
+
     // 3. Conversation Status Handler
-    const unbindStatus = realtimeClient.on<{ conversationId: string; status: string }>(
+    const unbindStatus = realtimeClient.on<{ conversationId: string; status: string; changedByUserId?: string }>(
       'conversation:status',
       (evt) => {
         const data = evt.data;
+        // Reopening from the inbox is the user's own action; only a customer-triggered reopen is news.
+        if (data?.changedByUserId && (data.changedByUserId === user.id || data.changedByUserId === (user as any).userId)) {
+          return;
+        }
         if (data?.status === 'open') {
           addNotification({
             type: 'conversation',
@@ -339,6 +368,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return () => {
       unbindNewMsg();
       unbindAssigned();
+      unbindHandoff();
       unbindStatus();
     };
   }, [user, addNotification]);

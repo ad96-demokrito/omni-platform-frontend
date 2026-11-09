@@ -56,6 +56,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { useDialog } from '../context/DialogContext';
 import { TeamsManager } from '../components/settings/TeamsManager';
+import { AutoAssignSetting } from '../components/settings/AutoAssignSetting';
 import { Card, CardHeader, CardTitle, CardDescription } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -955,6 +956,8 @@ export const SettingsPage: React.FC = () => {
               </div>
             )}
           </Card>
+
+          <AutoAssignSetting canManage={user?.role === 'owner' || user?.role === 'admin'} />
 
           <TeamsManager
             members={teamMembers}

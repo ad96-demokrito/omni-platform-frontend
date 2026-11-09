@@ -297,9 +297,30 @@ export const FlowCanvasNode: React.FC<NodeProps<FlowNodeData>> = memo(({ data, s
         )}
 
         {node.type === 'handoff' && (
-          <p className="text-[11px] text-rose-700 font-semibold flex items-center gap-1">
-            <UserCheck className="w-3 h-3" /> Hands off to human agent
-          </p>
+          <div className="space-y-1">
+            <p className="text-[11px] text-rose-700 font-semibold flex items-center gap-1">
+              <UserCheck className="w-3 h-3" /> Hands off to human agent
+            </p>
+            {node.customerMessage && (
+              <p className="line-clamp-2 text-gray-800 font-medium italic">"{node.customerMessage}"</p>
+            )}
+            <div className="flex flex-wrap gap-1 text-[10px] font-medium">
+              {node.priority && node.priority !== 'normal' && (
+                <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 uppercase">{node.priority}</span>
+              )}
+              {node.agentUserId ? (
+                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">Specific agent</span>
+              ) : node.assignMode === 'auto' ? (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800">Auto-assign</span>
+              ) : node.assignMode === 'none' ? (
+                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">Unassigned</span>
+              ) : null}
+              {node.teamId && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">Team</span>}
+              {node.timeoutMinutes ? (
+                <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800">Timeout {node.timeoutMinutes}m</span>
+              ) : null}
+            </div>
+          </div>
         )}
 
         {node.type === 'end' && (

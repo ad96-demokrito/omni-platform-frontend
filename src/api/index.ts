@@ -18,7 +18,10 @@ import type {
   Conversation,
   ConversationListParams,
   ConversationStatus,
+  ConversationCounts,
   Team,
+  TeamSettings,
+  VisitorHandoffState,
   Message,
   Flow,
   FlowDefinition,
@@ -242,6 +245,13 @@ export const conversationsApi = {
 
   resumeBot: (conversationId: string) =>
     apiClient.post<{ success: boolean; message: string }>(`/conversations/${conversationId}/resume-bot`),
+
+  /** Counts for the sidebar badge. */
+  getSummary: () => apiClient.get<ConversationCounts>('/conversations/summary'),
+
+  /** The agent started/stopped typing; webchat visitors see an "agent is typing" bubble. */
+  sendTyping: (conversationId: string, isTyping: boolean) =>
+    apiClient.post<{ success: boolean }>(`/conversations/${conversationId}/typing`, { isTyping }),
 };
 
 // ==================== FLOWS API ====================
@@ -564,6 +574,11 @@ export const teamsApi = {
 
   setMembers: (id: string, userIds: string[]) =>
     apiClient.put<Team>(`/teams/${id}/members`, { userIds }),
+
+  getSettings: () => apiClient.get<TeamSettings>('/teams/settings'),
+
+  updateSettings: (data: { autoAssignEnabled: boolean }) =>
+    apiClient.patch<TeamSettings>('/teams/settings', data),
 };
 
 // ==================== DEVELOPER API KEYS API ====================
@@ -765,7 +780,7 @@ export const webchatVisitorApi = {
     }),
 
   getMessages: (token: string) =>
-    apiClient.get<{ messages: Message[] }>('/webchat/messages', undefined, {
+    apiClient.get<{ messages: Message[]; handoff?: VisitorHandoffState; agentTyping?: boolean }>('/webchat/messages', undefined, {
       headers: { Authorization: `Bearer ${token}` },
       skipAuthRedirect: true,
     }),

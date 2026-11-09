@@ -183,12 +183,12 @@ export const FlowNodeHelpModal: React.FC<FlowNodeHelpModalProps> = ({ isOpen, on
       colorClass: 'text-rose-600 bg-rose-50 border-rose-200',
       description: 'Pauses automated bot flows and transfers the conversation to a human support agent.',
       howItWorks:
-        'Transitions the flow run to "handed_off" status, flags the conversation in the Omni Inbox, emits WebSocket alerts to online agents, and pauses automated triggers so human messages take precedence without bot interruption.',
+        'Pauses the bot for this conversation and shows the chat in the Omni Inbox with the reason you set. It goes to the specific agent you choose; otherwise, if auto-assign applies, to the least busy active agent (from the chosen team, or all agents); otherwise it waits in Pending and the team (or all agents) get an alert. You can send the customer a message, and optionally hand the chat back to the bot if nobody takes it within a set time.',
       ports: [
         { name: 'None (Terminal)', description: 'Hands off control to human agent in Omni Inbox' },
       ],
-      variables: 'Summarizes all collected variables and attaches them as an internal agent note.',
-      example: 'When customer asks "I want to speak with a human", hand off with VIP tag.',
+      variables: 'The answers collected so far (not your internal variables) are shown to the agent on the hand-off card. {{variables}} work in the customer message and reason.',
+      example: 'When the customer asks "I want to speak with a human", send "Connecting you to an agent…", route to the Support team with High priority, and hand back to the bot after 15 minutes if nobody answers.',
     },
     {
       id: 'end',

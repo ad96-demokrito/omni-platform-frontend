@@ -70,6 +70,13 @@ import { FlowCanvasNode, FlowNodeData } from '../components/flow/FlowCanvasNode'
 import { FlowCustomEdge } from '../components/flow/FlowCustomEdge';
 import { FlowToolbar } from '../components/flow/FlowToolbar';
 import { FlowNodeHelpModal } from '../components/flow/FlowNodeHelpModal';
+import {
+  EMPTY_HANDOFF_FORM,
+  HandoffFormState,
+  HandoffNodeFields,
+  handoffFormFromNode,
+  handoffNodeFromForm,
+} from '../components/flow/HandoffNodeFields';
 
 // Node and Edge types registered with React Flow
 const nodeTypes = {
@@ -162,6 +169,9 @@ const FlowEditorCanvas: React.FC = () => {
   const [intentDefault, setIntentDefault] = useState('');
   const [intentSaveIntentAs, setIntentSaveIntentAs] = useState('detected_intent');
   const [intentSaveSentimentAs, setIntentSaveSentimentAs] = useState('detected_sentiment');
+
+  // Human Handoff Form fields
+  const [handoffForm, setHandoffForm] = useState<HandoffFormState>(EMPTY_HANDOFF_FORM);
 
   // WhatsApp Template Form fields
   const [templateName, setTemplateName] = useState('');
@@ -555,6 +565,8 @@ const FlowEditorCanvas: React.FC = () => {
       setIntentSaveIntentAs('detected_intent');
       setIntentSaveSentimentAs('detected_sentiment');
     }
+
+    setHandoffForm(targetNode.type === 'handoff' ? handoffFormFromNode(targetNode) : EMPTY_HANDOFF_FORM);
 
     if (targetNode.type === 'template') {
       setTemplateName(targetNode.templateName || '');
@@ -958,7 +970,7 @@ const FlowEditorCanvas: React.FC = () => {
         };
         break;
       case 'handoff':
-        updatedNode = { id: editingNodeId, type: 'handoff' };
+        updatedNode = handoffNodeFromForm(editingNodeId, handoffForm);
         break;
       case 'end':
         updatedNode = { id: editingNodeId, type: 'end' };
@@ -1308,7 +1320,7 @@ const FlowEditorCanvas: React.FC = () => {
         onClose={() => setIsModalOpen(false)}
         title={`Configure Node: ${editingNodeId}`}
         description="Set up step properties, Meta approved WhatsApp templates, AI RAG agents, intent routers, delayed timers, and retry rules."
-        maxWidth={nodeType === 'template' ? '7xl' : (nodeType === 'ai_agent' || nodeType === 'intent_router' ? '4xl' : 'lg')}
+        maxWidth={nodeType === 'template' ? '7xl' : (nodeType === 'ai_agent' || nodeType === 'intent_router' ? '4xl' : nodeType === 'handoff' ? '2xl' : 'lg')}
       >
         <form onSubmit={handleSaveModal} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -2122,6 +2134,9 @@ const FlowEditorCanvas: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Form fields: Human Handoff */}
+          {nodeType === 'handoff' && <HandoffNodeFields value={handoffForm} onChange={setHandoffForm} />}
 
           {/* Form fields: Wait Node */}
           {nodeType === 'wait' && (

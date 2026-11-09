@@ -24,9 +24,13 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { cn, getUserInitials } from '../../lib/utils';
 import { Badge } from '../common/Badge';
+import { useConversationCounts } from '../../hooks/useConversationCounts';
 
 export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { user, logout } = useAuth();
+  const counts = useConversationCounts(!!user && user.role !== 'viewer');
+  // Chats waiting for this person or their team, not every pending chat in the workspace.
+  const pendingCount = counts?.waitingForMe ?? 0;
 
   const baseNav = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -116,7 +120,17 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ is
                   <Icon className="w-4 h-4 transition-transform group-hover:scale-110" />
                   <span>{item.name}</span>
                 </div>
-                <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                {item.href === '/inbox' && pendingCount > 0 ? (
+                  <span
+                    className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold text-center"
+                    title={`${pendingCount} chat${pendingCount === 1 ? '' : 's'} waiting for you or your team`}
+                    aria-label={`${pendingCount} chats waiting for you or your team`}
+                  >
+                    {pendingCount > 99 ? '99+' : pendingCount}
+                  </span>
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
               </NavLink>
             );
           })}

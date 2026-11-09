@@ -70,6 +70,8 @@ import { Modal } from '../components/common/Modal';
 import { DeliveryFailureNote } from '../components/common/DeliveryFailureNote';
 import { MessageStatusTicks } from '../components/chat/MessageStatusTicks';
 import { ConversationActions } from '../components/inbox/ConversationActions';
+import { HandoffBanner } from '../components/inbox/HandoffBanner';
+import { useAuth } from '../context/AuthContext';
 import { Input } from '../components/common/Input';
 import { formatDateTime, formatRelativeTime, cn } from '../lib/utils';
 import { WhatsAppTemplateCard } from '../components/chat/WhatsAppTemplateCard';
@@ -78,6 +80,7 @@ import { MEDIA_ACCEPT, validateMediaFile } from '../utils/media-limits';
 import { TemplateMediaUploader, TemplateMediaValue } from '../components/common/TemplateMediaUploader';
 
 export const InboxPage: React.FC = () => {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedConvId = searchParams.get('id');
 
@@ -89,7 +92,11 @@ export const InboxPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const [filterStatus, setFilterStatus] = useState<'all' | ConversationStatus>('all');
-  const [scopeFilter, setScopeFilter] = useState<'everyone' | 'mine' | 'unassigned'>('everyone');
+  // Agents open on their own chats; owners and admins start from the whole workspace. Everyone can
+  // still switch to Everyone / Unassigned, so nobody loses access to a chat.
+  const [scopeFilter, setScopeFilter] = useState<'everyone' | 'mine' | 'unassigned'>(
+    user?.role === 'agent' ? 'mine' : 'everyone'
+  );
   const [teamFilter, setTeamFilter] = useState<string>('all');
   const [assignees, setAssignees] = useState<TeamMember[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -197,6 +204,9 @@ export const InboxPage: React.FC = () => {
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
   const { showToast } = useToast();
+  const canWorkConversations = user?.role === 'owner' || user?.role === 'admin' || user?.role === 'agent';
+  // "My Teams" only makes sense for someone who is in at least one team.
+  const belongsToATeam = !!user && teams.some((team) => team.memberIds.includes(user.id));
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX;
@@ -952,12 +962,45 @@ export const InboxPage: React.FC = () => {
     }
   };
 
+  // Webchat visitors see "agent is typing". Cosmetic, so failures are ignored; sends at most every 3s
+  // while typing and a "stopped" signal after 4s of silence.
+  const typingSentAtRef = useRef(0);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    };
+  }, []);
+  const notifyAgentTyping = (text: string) => {
+    if (!selectedConvId || !canWorkConversations || activeConversation?.channelType !== 'webchat') return;
+    const conversationId = selectedConvId;
+    if (text.trim() && Date.now() - typingSentAtRef.current > 3000) {
+      typingSentAtRef.current = Date.now();
+      conversationsApi.sendTyping(conversationId, true).catch(() => {});
+    }
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => {
+      typingSentAtRef.current = 0;
+      conversationsApi.sendTyping(conversationId, false).catch(() => {});
+    }, 4000);
+  };
+
+  // Who wrote an outbound message, so agents can tell bot replies from human ones.
+  const senderLabelOf = (msg: Message): string | null => {
+    if (msg.direction !== 'outbound') return null;
+    if (msg.senderType === 'bot') return 'Bot';
+    if (!msg.senderUserId) return null;
+    const agent = assignees.find((a) => a.id === msg.senderUserId);
+    return agent ? agent.name || agent.email : 'Agent';
+  };
+
   const handleResumeBot = async () => {
     if (!selectedConvId) return;
     setIsResumingBot(true);
     try {
       await conversationsApi.resumeBot(selectedConvId);
       showToast('AI Bot / Flow reply mode resumed for this conversation', 'success');
+      await handleConversationChanged();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to resume AI bot', 'error');
     } finally {
@@ -1648,6 +1691,7 @@ export const InboxPage: React.FC = () => {
                 className="ml-auto text-[11px] bg-gray-100 font-semibold text-gray-700 px-2 py-1 rounded-lg border-0 focus:ring-1 focus:ring-primary-500 cursor-pointer"
               >
                 <option value="all">All Teams</option>
+                {belongsToATeam && <option value="mine">My Teams</option>}
                 {teams.map((team) => (
                   <option key={team.id} value={team.id}>
                     {team.name}
@@ -1730,6 +1774,16 @@ export const InboxPage: React.FC = () => {
                       >
                         {conv.status === 'pending' ? 'needs agent' : conv.status}
                       </Badge>
+                      {conv.status !== 'closed' && (conv.handoffPriority === 'urgent' || conv.handoffPriority === 'high') && (
+                        <span
+                          className={cn(
+                            'px-1.5 py-0 rounded text-[10px] font-bold uppercase',
+                            conv.handoffPriority === 'urgent' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white'
+                          )}
+                        >
+                          {conv.handoffPriority}
+                        </span>
+                      )}
                       {conv.channelDisplayName && (
                         <span
                           title={conv.channelDisplayName}
@@ -1829,20 +1883,28 @@ export const InboxPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                {/* Resume AI Bot Icon Button */}
-                <button
-                  type="button"
-                  onClick={handleResumeBot}
-                  disabled={isResumingBot}
-                  className="p-2 sm:p-2.5 rounded-xl bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center justify-center shadow-2xs transition-all disabled:opacity-50"
-                  title="Resume AI Bot (Transfer back to autonomous AI reply mode)"
-                >
-                  {isResumingBot ? (
-                    <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
-                  ) : (
-                    <Bot className="w-4 h-4 text-emerald-600" />
-                  )}
-                </button>
+                {/* Resume AI Bot: only while a person owns the case, and only for people who can act on it */}
+                {activeConversation.botPaused && activeConversation.status !== 'closed' && (
+                  <span className="hidden sm:inline text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">
+                    Bot paused
+                  </span>
+                )}
+                {canWorkConversations && activeConversation.botPaused && activeConversation.status !== 'closed' && (
+                  <button
+                    type="button"
+                    onClick={handleResumeBot}
+                    disabled={isResumingBot}
+                    className="p-2 sm:p-2.5 rounded-xl bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center justify-center shadow-2xs transition-all disabled:opacity-50"
+                    title="Resume AI Bot (Transfer back to autonomous AI reply mode)"
+                    aria-label="Resume AI Bot"
+                  >
+                    {isResumingBot ? (
+                      <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+                    ) : (
+                      <Bot className="w-4 h-4 text-emerald-600" />
+                    )}
+                  </button>
+                )}
 
                 {/* User Profile & CRM / Copilot Panel Toggle Icon Button */}
                 <button
@@ -1867,6 +1929,8 @@ export const InboxPage: React.FC = () => {
               teams={teams}
               onChanged={handleConversationChanged}
             />
+
+            <HandoffBanner conversation={activeConversation} />
 
             {/* Messages Feed */}
             <div
@@ -1946,6 +2010,10 @@ export const InboxPage: React.FC = () => {
                               : 'bg-white text-gray-900 border border-gray-200/80 rounded-tl-none'
                           )}
                         >
+                          {senderLabelOf(msg) && (
+                            <p className="text-[10px] font-semibold opacity-80">{senderLabelOf(msg)}</p>
+                          )}
+
                           {/* Shown instead of a silent blank when an image/video/audio file fails to load */}
                           {mediaUrl && mediaFailed && (isImage || isVideo || isAudio) && (
                             <div
@@ -2312,7 +2380,10 @@ export const InboxPage: React.FC = () => {
                     placeholder={isSending ? "Sending message..." : "Type a reply..."}
                     value={messageText}
                     disabled={isSending}
-                    onChange={(e) => setMessageText(e.target.value)}
+                    onChange={(e) => {
+                      setMessageText(e.target.value);
+                      notifyAgentTyping(e.target.value);
+                    }}
                     className="flex-1 px-4 py-2.5 text-xs rounded-xl bg-gray-100 border border-transparent focus:bg-white focus:border-primary-500 focus:outline-none disabled:opacity-60"
                   />
                   <Button
