@@ -74,6 +74,7 @@ import { Input } from '../components/common/Input';
 import { formatDateTime, formatRelativeTime, cn } from '../lib/utils';
 import { WhatsAppTemplateCard } from '../components/chat/WhatsAppTemplateCard';
 import { registerDynamicTemplates } from '../utils/whatsapp-templates';
+import { MEDIA_ACCEPT, validateMediaFile } from '../utils/media-limits';
 import { TemplateMediaUploader, TemplateMediaValue } from '../components/common/TemplateMediaUploader';
 
 export const InboxPage: React.FC = () => {
@@ -222,17 +223,19 @@ export const InboxPage: React.FC = () => {
   };
 
   const getMediaUrl = (msg: Message): string | null => {
+    const isUsableUrl = (url?: string): url is string =>
+      !!url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/api/'));
+
+    // The server links every stored file with a signed URL, so no login token has to ride in the URL.
+    if (isUsableUrl(msg.mediaUrl)) return msg.mediaUrl;
+
+    // Fallback for payloads without a signed link: authorise the stream with the login token.
     const key = msg.mediaStorageKey || msg.content?.mediaStorageKey;
     if (key) {
       const token = localStorage.getItem('auth_token') || '';
       return `/api/media/file?key=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`;
     }
-    if (msg.mediaUrl && (msg.mediaUrl.startsWith('http://') || msg.mediaUrl.startsWith('https://') || msg.mediaUrl.startsWith('/api/'))) {
-      return msg.mediaUrl;
-    }
-    if (msg.content?.mediaUrl && (msg.content.mediaUrl.startsWith('http://') || msg.content.mediaUrl.startsWith('https://') || msg.content.mediaUrl.startsWith('/api/'))) {
-      return msg.content.mediaUrl;
-    }
+    if (isUsableUrl(msg.content?.mediaUrl)) return msg.content.mediaUrl;
     return null;
   };
 
@@ -683,14 +686,26 @@ export const InboxPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeConversation, messages]);
 
+  // Media URLs the browser failed to load, so the bubble can offer an "Open" link instead of a blank.
+  const [failedMediaUrls, setFailedMediaUrls] = useState<Record<string, true>>({});
+  const markMediaFailed = (url: string) =>
+    setFailedMediaUrls((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+
+  // Free the browser's copy of the preview image whenever it is replaced, cleared, or the page unmounts.
+  useEffect(() => {
+    if (!mediaPreviewUrl) return;
+    return () => URL.revokeObjectURL(mediaPreviewUrl);
+  }, [mediaPreviewUrl]);
+
   // Media attachment handlers
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Check size limit (50MB)
-    if (file.size > 50 * 1024 * 1024) {
-      showToast('File size exceeds 50MB limit', 'error');
+    // Type and per-kind size limits (same rules the server enforces for WhatsApp)
+    const problem = validateMediaFile(file);
+    if (problem) {
+      showToast(problem, 'error');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -1876,9 +1891,10 @@ export const InboxPage: React.FC = () => {
                   const mediaUrl = getMediaUrl(msg);
                   const msgType = msg.type || msg.content?.type || 'text';
                   const isImage = msgType === 'image' || msgType === 'sticker';
-                  const isDocument = msgType === 'document';
+                  const isDocument = msgType === 'document' || msgType === 'file';
                   const isAudio = msgType === 'audio';
                   const isVideo = msgType === 'video';
+                  const mediaFailed = !!mediaUrl && !!failedMediaUrls[mediaUrl];
                   const isTemplate =
                     msgType === 'template' ||
                     !!msg.content?.templateName ||
@@ -1930,14 +1946,37 @@ export const InboxPage: React.FC = () => {
                               : 'bg-white text-gray-900 border border-gray-200/80 rounded-tl-none'
                           )}
                         >
+                          {/* Shown instead of a silent blank when an image/video/audio file fails to load */}
+                          {mediaUrl && mediaFailed && (isImage || isVideo || isAudio) && (
+                            <div
+                              className={cn(
+                                'flex items-center gap-2 p-2.5 rounded-xl border text-xs mb-1.5',
+                                isOutbound
+                                  ? 'bg-primary-700/40 border-primary-400/30 text-white'
+                                  : 'bg-gray-50 border-gray-200 text-gray-700'
+                              )}
+                            >
+                              <span className="flex-1">This file could not be loaded.</span>
+                              <a
+                                href={mediaUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 font-semibold underline"
+                              >
+                                Open <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          )}
+
                           {/* 1. Image / Sticker Attachment */}
-                          {isImage && mediaUrl && (
+                          {isImage && mediaUrl && !mediaFailed && (
                             <div className="relative group overflow-hidden rounded-xl border border-black/5 mb-1.5">
                               <img
                                 src={mediaUrl}
                                 alt={msg.text || 'Received image'}
                                 className="max-h-64 w-full object-cover rounded-xl cursor-pointer hover:opacity-95 transition-opacity"
                                 onClick={() => setPreviewImage(mediaUrl)}
+                                onError={() => markMediaFailed(mediaUrl)}
                                 loading="lazy"
                               />
                               <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -2000,12 +2039,13 @@ export const InboxPage: React.FC = () => {
                           {/* 3. Audio / Voice Note */}
                           {isAudio && (
                             <div className="pt-1 pb-0.5 min-w-[240px]">
-                              {mediaUrl ? (
+                              {mediaUrl && mediaFailed ? null : mediaUrl ? (
                                 <audio
                                   controls
                                   src={mediaUrl}
                                   className="w-full h-8"
                                   preload="metadata"
+                                  onError={() => markMediaFailed(mediaUrl)}
                                 />
                               ) : (
                                 <div className="flex items-center gap-2 p-2 rounded-lg bg-black/10 text-xs">
@@ -2017,13 +2057,14 @@ export const InboxPage: React.FC = () => {
                           )}
 
                           {/* 4. Video Player */}
-                          {isVideo && mediaUrl && (
+                          {isVideo && mediaUrl && !mediaFailed && (
                             <div className="rounded-xl overflow-hidden mb-1.5 border border-black/5">
                               <video
                                 controls
                                 src={mediaUrl}
                                 className="max-h-64 w-full rounded-xl"
                                 preload="metadata"
+                                onError={() => markMediaFailed(mediaUrl)}
                               />
                             </div>
                           )}
@@ -2209,7 +2250,7 @@ export const InboxPage: React.FC = () => {
                 ref={fileInputRef}
                 onChange={handleFileSelect}
                 className="hidden"
-                accept="image/*,video/*,audio/*,application/pdf,text/*,.doc,.docx,.xls,.xlsx,.zip"
+                accept={MEDIA_ACCEPT}
               />
 
               {activeConversation.status === 'closed' ? (

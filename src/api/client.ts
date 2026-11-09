@@ -90,7 +90,10 @@ class ApiClient {
 
     // Handle other error responses
     if (!response.ok) {
-      let errorMessage = `HTTP ${response.status}`;
+      // A reverse proxy that rejects an oversized upload answers 413 with an HTML page, not our JSON.
+      let errorMessage = response.status === 413
+        ? 'The file is too large for the server to accept. Try a smaller file.'
+        : `HTTP ${response.status}`;
       try {
         const errorData = await response.json();
         errorMessage = errorData.error || errorData.message || errorMessage;

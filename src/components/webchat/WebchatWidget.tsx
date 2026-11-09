@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { webchatVisitorApi } from '../../api';
+import { MEDIA_ACCEPT, validateMediaFile } from '../../utils/media-limits';
 import type { PublicWidgetConfig, VisitorSessionInitResponse, Message } from '../../types';
 
 export interface WebchatWidgetProps {
@@ -58,6 +59,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [agentTyping, setAgentTyping] = useState(false);
 
   // Visitor Info Form (if required)
@@ -463,17 +465,24 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
     const file = e.target.files?.[0];
     if (!file || !token || !session) return;
 
+    const problem = validateMediaFile(file);
+    if (problem) {
+      setUploadError(problem);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setUploadError(null);
     setIsUploading(true);
 
     try {
       const uploadRes = await webchatVisitorApi.uploadMedia(token, file);
-      const isImage = file.type.startsWith('image/');
 
+      // The server only accepts the storage key of this visitor's own upload; it builds the URL itself.
       const msgRes = await webchatVisitorApi.sendMessage(token, {
-        mediaUrl: uploadRes.url,
         mediaStorageKey: uploadRes.key,
-        type: isImage ? 'image' : 'document',
-        text: file.name,
+        type: uploadRes.type,
+        filename: uploadRes.filename,
       });
 
       setMessages((prev) => {
@@ -483,9 +492,9 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
         }
         return [...prev, msgRes.message];
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[Webchat] Media upload failed:', err);
-      alert('Failed to upload file. Please try again.');
+      setUploadError(err instanceof Error ? err.message : 'Failed to upload file. Please try again.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -728,7 +737,12 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
             const isVisitor = msg.direction === 'inbound';
             const textContent =
               typeof msg.content === 'object' ? msg.content?.text : msg.content;
-            const mediaUrl = typeof msg.content === 'object' ? msg.content?.mediaUrl : null;
+            // msg.mediaUrl is a fresh signed link built from the stored file; content.mediaUrl can be a stale one.
+            const mediaUrl =
+              msg.mediaUrl || (typeof msg.content === 'object' ? msg.content?.mediaUrl : null) || null;
+            const attachmentName = typeof msg.content === 'object' ? msg.content?.filename : undefined;
+            // Uploads without a caption carry no text; "[Image]"-style placeholders are not for display.
+            const hasMedia = Boolean(mediaUrl);
             const buttons =
               typeof msg.content === 'object' && Array.isArray(msg.content?.buttons)
                 ? msg.content.buttons
@@ -762,7 +776,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                     style={isVisitor ? { backgroundColor: primaryColor } : {}}
                   >
                     {/* Media render */}
-                    {msg.type === 'image' && mediaUrl && (
+                    {(msg.type === 'image' || msg.type === 'sticker') && mediaUrl && (
                       <div className="mb-2 rounded-xl overflow-hidden cursor-pointer">
                         <img
                           src={mediaUrl}
@@ -773,7 +787,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                       </div>
                     )}
 
-                    {msg.type === 'document' && mediaUrl && (
+                    {(msg.type === 'document' || msg.type === 'file') && mediaUrl && (
                       <a
                         href={mediaUrl}
                         target="_blank"
@@ -782,7 +796,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                       >
                         <FileText className="w-4 h-4 shrink-0" />
                         <span className="truncate flex-1 font-medium">
-                          {textContent || 'Download attachment'}
+                          {attachmentName || textContent || 'Download attachment'}
                         </span>
                         <Download className="w-3.5 h-3.5 shrink-0" />
                       </a>
@@ -794,8 +808,14 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
                       </div>
                     )}
 
+                    {msg.type === 'video' && mediaUrl && (
+                      <div className="mb-2 rounded-xl overflow-hidden">
+                        <video controls preload="metadata" src={mediaUrl} className="max-h-56 max-w-full" />
+                      </div>
+                    )}
+
                     {/* Text content */}
-                    {textContent && msg.type !== 'document' && (
+                    {textContent && !(hasMedia && msg.type === 'document') && (
                       <p className="whitespace-pre-wrap">{textContent}</p>
                     )}
 
@@ -874,6 +894,14 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
       {/* FOOTER INPUT AREA */}
       {!showInfoForm && (
         <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 shrink-0">
+          {uploadError && (
+            <p
+              role="alert"
+              className="mb-2 px-3 py-2 rounded-lg text-xs text-red-700 bg-red-50 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900"
+            >
+              {uploadError}
+            </p>
+          )}
           <div className="flex items-center space-x-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl px-3 py-1.5 border border-slate-200/80 dark:border-slate-700/80 focus-within:border-indigo-500 dark:focus-within:border-indigo-500 transition-colors">
             {/* Attachment Button */}
             <input
@@ -881,7 +909,7 @@ export const WebchatWidget: React.FC<WebchatWidgetProps> = ({
               ref={fileInputRef}
               onChange={handleFileUpload}
               className="hidden"
-              accept="image/*,application/pdf,.doc,.docx,.txt"
+              accept={MEDIA_ACCEPT}
             />
             <button
               type="button"

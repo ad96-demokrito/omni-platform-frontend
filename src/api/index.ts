@@ -774,9 +774,10 @@ export const webchatVisitorApi = {
     token: string,
     data: {
       text?: string;
-      mediaUrl?: string;
+      /** Storage key returned by uploadMedia; the server builds the media URL from it. */
       mediaStorageKey?: string;
       type?: string;
+      filename?: string;
     }
   ) =>
     apiClient.post<{ message: Message }>('/webchat/messages', data, {
@@ -800,6 +801,7 @@ export const webchatVisitorApi = {
     return apiClient.post<{
       key: string;
       url: string;
+      type: 'image' | 'video' | 'audio' | 'document';
       filename: string;
       contentType: string;
       size: number;
