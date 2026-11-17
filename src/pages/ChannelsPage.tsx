@@ -73,6 +73,7 @@ export const ChannelsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isFbSdkLoaded, setIsFbSdkLoaded] = useState(false);
   const [isLaunchingFb, setIsLaunchingFb] = useState(false);
+  const fbInitializedRef = useRef(false);
 
   // Modals
   const [isEmbeddedModalOpen, setIsEmbeddedModalOpen] = useState(false);
@@ -223,34 +224,35 @@ export const ChannelsPage: React.FC = () => {
     loadData();
   }, []);
 
-  // Initialize and load Facebook JavaScript SDK
+  // Initialize and load Facebook JavaScript SDK (FB.init must run exactly once, before FB.login)
   useEffect(() => {
     if (!config?.appId) return;
 
-    if (window.FB) {
+    const initFb = () => {
+      if (fbInitializedRef.current || !window.FB) return;
       try {
         window.FB.init({
           appId: config.appId,
           cookie: true,
+          autoLogAppEvents: true,
           xfbml: true,
           version: 'v21.0',
         });
+        fbInitializedRef.current = true;
         setIsFbSdkLoaded(true);
       } catch (err) {
         console.error('Failed to init FB SDK:', err);
       }
+    };
+
+    // SDK already on the page (e.g. navigating back to this page)
+    if (window.FB) {
+      initFb();
       return;
     }
 
-    window.fbAsyncInit = function () {
-      window.FB.init({
-        appId: config.appId,
-        cookie: true,
-        xfbml: true,
-        version: 'v21.0',
-      });
-      setIsFbSdkLoaded(true);
-    };
+    // The SDK calls this once it has fully loaded
+    window.fbAsyncInit = initFb;
 
     const scriptId = 'facebook-jssdk';
     if (!document.getElementById(scriptId)) {
@@ -259,21 +261,7 @@ export const ChannelsPage: React.FC = () => {
       js.src = 'https://connect.facebook.net/en_US/sdk.js';
       js.async = true;
       js.defer = true;
-      js.onload = () => {
-        if (window.FB) {
-          try {
-            window.FB.init({
-              appId: config.appId,
-              cookie: true,
-              xfbml: true,
-              version: 'v21.0',
-            });
-            setIsFbSdkLoaded(true);
-          } catch (e) {
-            console.error('FB init error:', e);
-          }
-        }
-      };
+      js.crossOrigin = 'anonymous';
       document.body.appendChild(js);
     }
   }, [config?.appId]);
@@ -373,7 +361,7 @@ export const ChannelsPage: React.FC = () => {
       return;
     }
 
-    if (!window.FB) {
+    if (!window.FB || !fbInitializedRef.current) {
       showToast('Meta Facebook SDK is still loading. Please try again in a few seconds.', 'info');
       return;
     }
@@ -1457,7 +1445,7 @@ export const ChannelsPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={launchEmbeddedSignup}
-                    disabled={isLaunchingFb}
+                    disabled={isLaunchingFb || !isFbSdkLoaded}
                     className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl font-bold text-sm text-white bg-[#1877F2] hover:bg-[#166fe5] shadow-md hover:shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                   >
                     {isLaunchingFb ? (
