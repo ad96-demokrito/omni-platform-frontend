@@ -226,12 +226,12 @@ export const WhatsAppTemplateLivePreview: React.FC<WhatsAppTemplateLivePreviewPr
           )}
 
           {headerType === 'IMAGE' && (
-            <div className="relative w-full aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center border-b border-black/5 dark:border-white/5">
+            <div className="relative w-full h-[220px] bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center border-b border-black/5 dark:border-white/5">
               {headerMediaUrl ? (
                 <img
                   src={headerMediaUrl}
                   alt="Template Header Preview"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';
                   }}
@@ -247,12 +247,13 @@ export const WhatsAppTemplateLivePreview: React.FC<WhatsAppTemplateLivePreviewPr
           )}
 
           {headerType === 'VIDEO' && (
-            <div className="relative w-full aspect-video bg-slate-900 overflow-hidden flex items-center justify-center border-b border-black/5 dark:border-white/5">
+            <div className="relative w-full h-[220px] bg-black overflow-hidden flex items-center justify-center border-b border-black/5 dark:border-white/5">
               {headerMediaUrl ? (
                 <video
                   src={headerMediaUrl}
                   controls
-                  className="w-full h-full object-cover"
+                  playsInline
+                  className="w-full h-full object-contain bg-black"
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center text-slate-300 p-4 text-center">
