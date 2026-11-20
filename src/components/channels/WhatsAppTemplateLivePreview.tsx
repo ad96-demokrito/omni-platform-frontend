@@ -15,6 +15,8 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { TemplateHeaderFormat, TemplateCategory } from '../../types';
+import { CarouselCardStrip } from '../common/CarouselCardStrip';
+import type { CarouselPreviewCard } from '../../utils/carousel-template';
 
 export interface WhatsAppTemplatePreviewData {
   name: string;
@@ -37,6 +39,8 @@ export interface WhatsAppTemplatePreviewData {
     phoneNumber?: string;
     code?: string;
   }>;
+  /** Media-card carousel shown under the main bubble. */
+  carouselCards?: CarouselPreviewCard[];
   businessName?: string;
 }
 
@@ -140,6 +144,7 @@ export const WhatsAppTemplateLivePreview: React.FC<WhatsAppTemplateLivePreviewPr
     bodySamples,
     footerText,
     buttons,
+    carouselCards,
     businessName = 'Omni Platform',
   } = data;
 
@@ -367,6 +372,11 @@ export const WhatsAppTemplateLivePreview: React.FC<WhatsAppTemplateLivePreviewPr
             </div>
           )}
         </div>
+
+        {/* 5. CAROUSEL CARDS (below the main bubble) */}
+        {carouselCards && carouselCards.length > 0 && (
+          <CarouselCardStrip cards={carouselCards} className="mt-2" />
+        )}
       </div>
 
       {/* Footer Info / Meta Rules Guide */}

@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { CarouselCardStrip } from '../common/CarouselCardStrip';
 import { resolveTemplateMessage, ParsedTemplateDetails } from '../../utils/whatsapp-templates';
 import { WhatsAppTemplate } from '../../types';
 
@@ -59,6 +60,7 @@ export const WhatsAppTemplateCard: React.FC<WhatsAppTemplateCardProps> = ({
     bodyText,
     footerText,
     buttons,
+    carouselCards,
   } = parsed;
 
   const isImageHeader = (headerType === 'IMAGE' || (!headerType && headerMediaUrl)) && !!headerMediaUrl && !imageError;
@@ -234,6 +236,13 @@ export const WhatsAppTemplateCard: React.FC<WhatsAppTemplateCardProps> = ({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Carousel cards (media-card carousel templates) */}
+      {carouselCards.length > 0 && (
+        <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-700/60 pt-3 bg-gray-50/50 dark:bg-gray-900/30">
+          <CarouselCardStrip cards={carouselCards} onQuickReplyClick={onQuickReplyClick} />
         </div>
       )}
 

@@ -132,8 +132,13 @@ export interface TemplateButton {
   example?: string | string[];
 }
 
+/** One card of a media-card carousel: HEADER (IMAGE/VIDEO) + optional BODY + BUTTONS. */
+export interface TemplateCarouselCard {
+  components: TemplateComponent[];
+}
+
 export interface TemplateComponent {
-  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS';
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS' | 'CAROUSEL';
   format?: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'VIDEO';
   text?: string;
   example?: {
@@ -142,7 +147,34 @@ export interface TemplateComponent {
     body_text?: string[][];
   };
   buttons?: TemplateButton[];
+  /** Only for type 'CAROUSEL'. */
+  cards?: TemplateCarouselCard[];
   [key: string]: any;
+}
+
+/** A card button that needs a value at send time (url suffix) or a payload (quick reply). */
+export interface CarouselSendButton {
+  /** Position of the button on the template card. */
+  index: number;
+  subType: 'quick_reply' | 'url';
+  param?: string;
+  /** Label of a quick-reply button; sent back as the tap's payload. */
+  text?: string;
+}
+
+/** Per-send data for one card of a carousel template: its media, variables and button values. */
+export interface CarouselSendCard {
+  headerType: 'IMAGE' | 'VIDEO';
+  /** Uploaded file; preferred over `headerValue` and re-signed by the backend at send time. */
+  mediaStorageKey?: string;
+  /** Pasted URL, or a {{variable}} for campaigns and flows. */
+  headerValue?: string;
+  filename?: string;
+  /** Values for the card body's {{1}}, {{2}}… in order. */
+  bodyParams?: string[];
+  buttons?: CarouselSendButton[];
+  /** Signed URL the backend adds to stored messages for display. */
+  mediaUrl?: string;
 }
 
 export interface CreateWhatsAppTemplatePayload {
@@ -469,6 +501,8 @@ export interface TemplateNode {
   headerValue?: string;
   mediaStorageKey?: string;
   filename?: string;
+  /** Per-card media, variables and button values when the template is a carousel. */
+  carouselCards?: CarouselSendCard[];
   buttons?: TemplateButtonAction[];
   waitForDelivery?: boolean;
   onDelivered?: string;
@@ -621,6 +655,8 @@ export interface BroadcastDefinition {
   headerValue?: string;
   mediaStorageKey?: string;
   filename?: string;
+  /** Per-card media, variables and button values when the template is a carousel. */
+  carouselCards?: CarouselSendCard[];
 }
 
 export interface FlowCampaignDefinition {

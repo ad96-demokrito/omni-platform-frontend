@@ -58,6 +58,7 @@ import type {
   WhatsAppTemplate,
   Channel,
   KnowledgeBase,
+  CarouselSendCard,
 } from '../types';
 import { useToast } from '../context/ToastContext';
 import { Button } from '../components/common/Button';
@@ -66,6 +67,13 @@ import { Input } from '../components/common/Input';
 import { Spinner } from '../components/common/Tabs';
 import { Badge } from '../components/common/Badge';
 import { TemplateMediaUploader, TemplateMediaValue } from '../components/common/TemplateMediaUploader';
+import { CarouselSendEditor } from '../components/common/CarouselSendEditor';
+import {
+  buildInitialSendCards,
+  getCarouselCardSpecs,
+  getCarouselComponent,
+  validateSendCards,
+} from '../utils/carousel-template';
 import { FlowCanvasNode, FlowNodeData } from '../components/flow/FlowCanvasNode';
 import { FlowCustomEdge } from '../components/flow/FlowCustomEdge';
 import { FlowToolbar } from '../components/flow/FlowToolbar';
@@ -179,6 +187,7 @@ const FlowEditorCanvas: React.FC = () => {
   const [templateHeaderType, setTemplateHeaderType] = useState<'TEXT' | 'IMAGE' | 'DOCUMENT' | 'VIDEO' | undefined>();
   const [templateHeaderValue, setTemplateHeaderValue] = useState('');
   const [templateMedia, setTemplateMedia] = useState<TemplateMediaValue>({});
+  const [carouselCards, setCarouselCards] = useState<CarouselSendCard[]>([]);
   const [templateParams, setTemplateParams] = useState<Array<{ key: string; value: string }>>([]);
   const [templateButtons, setTemplateButtons] = useState<Array<{ buttonText: string; next: string }>>([]);
   const [templateSaveAs, setTemplateSaveAs] = useState('');
@@ -584,6 +593,7 @@ const FlowEditorCanvas: React.FC = () => {
           : []
       );
       setTemplateButtons(targetNode.buttons || []);
+      setCarouselCards(targetNode.carouselCards || []);
       setTemplateSaveAs(targetNode.saveAs || '');
     } else {
       setTemplateName('');
@@ -593,6 +603,7 @@ const FlowEditorCanvas: React.FC = () => {
       setTemplateMedia({});
       setTemplateParams([]);
       setTemplateButtons([]);
+      setCarouselCards([]);
       setTemplateSaveAs('');
     }
 
@@ -648,9 +659,22 @@ const FlowEditorCanvas: React.FC = () => {
       setTemplateParams([]);
     }
 
-    // 3. Quick-Reply & CTA Buttons Decomposition
+    // 3. Carousel cards: per-card media/values. A tapped card button comes back as its label, so
+    // the flow branches on the distinct quick-reply labels across all cards.
+    const isCarouselTemplate = !!getCarouselComponent(found);
+    setCarouselCards(isCarouselTemplate ? buildInitialSendCards(found) : []);
+
+    // 4. Quick-Reply & CTA Buttons Decomposition
     const buttonsComp = found.components?.find((c) => c.type === 'BUTTONS');
-    if (buttonsComp?.buttons && buttonsComp.buttons.length > 0) {
+    if (isCarouselTemplate) {
+      const replyLabels = new Set(
+        getCarouselCardSpecs(found)
+          .flatMap((spec) => spec.buttons)
+          .filter((b) => b.type === 'QUICK_REPLY' && b.text)
+          .map((b) => b.text)
+      );
+      setTemplateButtons(Array.from(replyLabels, (buttonText) => ({ buttonText, next: '' })));
+    } else if (buttonsComp?.buttons && buttonsComp.buttons.length > 0) {
       setTemplateButtons(
         buttonsComp.buttons.map((btn) => ({
           buttonText: btn.text || '',
@@ -887,6 +911,13 @@ const FlowEditorCanvas: React.FC = () => {
         };
         break;
       case 'template': {
+        if (selectedMetaTemplate && getCarouselComponent(selectedMetaTemplate)) {
+          const carouselError = validateSendCards(selectedMetaTemplate, carouselCards);
+          if (carouselError) {
+            showToast(carouselError, 'error');
+            return;
+          }
+        }
         const pObj: Record<string, string> = {};
         templateParams.forEach((p) => {
           if (p.key.trim() && p.value.trim()) pObj[p.key.trim()] = p.value.trim();
@@ -902,6 +933,7 @@ const FlowEditorCanvas: React.FC = () => {
           mediaStorageKey: templateMedia.mediaStorageKey,
           filename: templateMedia.filename,
           templateParams: Object.keys(pObj).length ? pObj : undefined,
+          carouselCards: carouselCards.length > 0 ? carouselCards : undefined,
           buttons: templateButtons.filter((b) => b.buttonText.trim()),
           saveAs: templateSaveAs.trim() || undefined,
           retryConfig,
@@ -1608,6 +1640,18 @@ const FlowEditorCanvas: React.FC = () => {
                     />
                   )}
                 </div>
+
+                {/* Carousel cards: media and values per card */}
+                {selectedMetaTemplate && getCarouselComponent(selectedMetaTemplate) && (
+                  <div className="p-3.5 bg-slate-50 rounded-2xl border border-gray-200/80">
+                    <CarouselSendEditor
+                      template={selectedMetaTemplate}
+                      value={carouselCards}
+                      onChange={setCarouselCards}
+                      allowVariables={true}
+                    />
+                  </div>
+                )}
 
                 {/* 2. Dynamic Body Parameter Mappings */}
                 <div className="p-3.5 bg-slate-50 rounded-2xl border border-gray-200/80 space-y-3">

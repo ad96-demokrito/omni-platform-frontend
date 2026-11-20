@@ -73,6 +73,7 @@ import type {
   WebchatBusinessHours,
   PublicWidgetConfig,
   VisitorSessionInitResponse,
+  CarouselSendCard,
 } from '../types';
 
 // ==================== AUTH API ====================
@@ -225,6 +226,8 @@ export const conversationsApi = {
       headerValue?: string;
       mediaStorageKey?: string;
       filename?: string;
+      /** Per-card media, variables and button values for a carousel template. */
+      carouselCards?: CarouselSendCard[];
     }
   ) => apiClient.post<Message>(`/conversations/${conversationId}/template`, data),
 

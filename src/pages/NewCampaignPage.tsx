@@ -29,7 +29,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { campaignsApi, channelsApi, contactsApi, flowsApi } from '../api';
-import type { Channel, Contact, Flow, DripStep, WhatsAppTemplate } from '../types';
+import type { Channel, Contact, Flow, DripStep, WhatsAppTemplate, CarouselSendCard } from '../types';
 import { getTierInfo, calculateTierCapacity } from '../lib/whatsapp-tiers';
 import { useToast } from '../context/ToastContext';
 import { Card } from '../components/common/Card';
@@ -41,6 +41,13 @@ import {
   TemplateMediaUploader,
   TemplateMediaValue,
 } from '../components/common/TemplateMediaUploader';
+import { CarouselSendEditor } from '../components/common/CarouselSendEditor';
+import { CarouselCardStrip } from '../components/common/CarouselCardStrip';
+import {
+  buildInitialSendCards,
+  getCarouselComponent,
+  validateSendCards,
+} from '../utils/carousel-template';
 import {
   registerDynamicTemplates,
   resolveTemplateMessage,
@@ -77,6 +84,7 @@ export const NewCampaignPage: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<WhatsAppTemplate | null>(null);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
   const [templateMedia, setTemplateMedia] = useState<TemplateMediaValue>({});
+  const [carouselCards, setCarouselCards] = useState<CarouselSendCard[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
   // Drip fields
@@ -149,6 +157,7 @@ export const NewCampaignPage: React.FC = () => {
       mediaStorageKey: '',
       filename: headerFormat === 'DOCUMENT' ? `${template.name}_document.pdf` : undefined,
     });
+    setCarouselCards(getCarouselComponent(template) ? buildInitialSendCards(template) : []);
   };
 
   // Load WhatsApp templates when channel changes or template broadcast is active
@@ -271,8 +280,9 @@ export const NewCampaignPage: React.FC = () => {
       headerType: templateHeaderType || undefined,
       headerValue: templateMedia.headerValue || '',
       knownTemplates: channelTemplates,
+      carouselCards,
     });
-  }, [selectedTemplate, templateParams, templateHeaderType, templateMedia, channelTemplates]);
+  }, [selectedTemplate, templateParams, templateHeaderType, templateMedia, channelTemplates, carouselCards]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -296,6 +306,13 @@ export const NewCampaignPage: React.FC = () => {
         if (!selectedTemplate) {
           showToast('Please select a WhatsApp template for this broadcast', 'error');
           return;
+        }
+        if (getCarouselComponent(selectedTemplate)) {
+          const carouselError = validateSendCards(selectedTemplate, carouselCards);
+          if (carouselError) {
+            showToast(carouselError, 'error');
+            return;
+          }
         }
       } else {
         if (!broadcastMessage.trim()) {
@@ -340,6 +357,7 @@ export const NewCampaignPage: React.FC = () => {
             headerValue: templateMedia.headerValue || undefined,
             mediaStorageKey: templateMedia.mediaStorageKey || undefined,
             filename: templateMedia.filename || undefined,
+            carouselCards: getCarouselComponent(selectedTemplate) ? carouselCards : undefined,
             tags: selectedTags,
           };
         } else {
@@ -786,6 +804,17 @@ export const NewCampaignPage: React.FC = () => {
                             </div>
                           </div>
                         )}
+
+                        {/* Carousel cards: media + values per card */}
+                        {getCarouselComponent(selectedTemplate) && (
+                          <CarouselSendEditor
+                            template={selectedTemplate}
+                            value={carouselCards}
+                            onChange={setCarouselCards}
+                            allowVariables={true}
+                            disabled={isSubmitting}
+                          />
+                        )}
                       </div>
 
                       {/* Right: Live Interactive WhatsApp Card Preview */}
@@ -879,6 +908,9 @@ export const NewCampaignPage: React.FC = () => {
                                 </div>
                               )}
                             </div>
+                          )}
+                          {previewData && previewData.carouselCards.length > 0 && (
+                            <CarouselCardStrip cards={previewData.carouselCards} className="mt-2 max-w-sm mx-auto" />
                           )}
                         </div>
                       </div>

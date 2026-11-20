@@ -51,6 +51,8 @@ import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
+import { CarouselCardStrip } from '../components/common/CarouselCardStrip';
+import { cardsFromTemplateComponent, isCarouselComponent } from '../utils/carousel-template';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
@@ -1784,6 +1786,8 @@ export const ChannelsPage: React.FC = () => {
                 const bodyComp = tpl.components?.find((c) => c.type === 'BODY');
                 const footerComp = tpl.components?.find((c) => c.type === 'FOOTER');
                 const buttonsComp = tpl.components?.find((c) => c.type === 'BUTTONS');
+                const carouselComp = tpl.components?.find((c) => isCarouselComponent(c));
+                const carouselCards = carouselComp ? cardsFromTemplateComponent(carouselComp) : [];
 
                 const templateKey = tpl.id || tpl.name;
                 const isExpanded = expandedTemplates.has(templateKey);
@@ -1820,6 +1824,11 @@ export const ChannelsPage: React.FC = () => {
                         {headerComp?.format && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300">
                             Header: {headerComp.format}
+                          </span>
+                        )}
+                        {carouselComp && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/40">
+                            Carousel · {carouselCards.length} cards
                           </span>
                         )}
                       </div>
@@ -1872,6 +1881,8 @@ export const ChannelsPage: React.FC = () => {
                         </p>
                       )}
                     </div>
+
+                    {carouselCards.length > 0 && <CarouselCardStrip cards={carouselCards} />}
 
                     {/* Interactive Buttons Preview */}
                     {buttonsComp?.buttons && buttonsComp.buttons.length > 0 && (

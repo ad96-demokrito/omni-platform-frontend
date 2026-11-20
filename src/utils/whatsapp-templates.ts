@@ -1,4 +1,10 @@
-import { WhatsAppTemplate } from '../types';
+import { CarouselSendCard, WhatsAppTemplate } from '../types';
+import {
+  CarouselPreviewCard,
+  cardsFromTemplateComponent,
+  isCarouselComponent,
+  previewCardFromSent,
+} from './carousel-template';
 
 // In-memory cache for runtime-discovered templates per tenant channel
 const dynamicTemplateRegistry = new Map<string, WhatsAppTemplate>();
@@ -36,6 +42,8 @@ export interface ParsedTemplateDetails {
     url?: string;
     phone_number?: string;
   }>;
+  /** Media cards of a carousel template (empty for standard templates). */
+  carouselCards: CarouselPreviewCard[];
 }
 
 /**
@@ -51,6 +59,8 @@ export function resolveTemplateMessage(options: {
   content?: Record<string, any>;
   rawText?: string;
   knownTemplates?: WhatsAppTemplate[];
+  /** Per-send card data (media, body values); falls back to `content.carouselCards`. */
+  carouselCards?: CarouselSendCard[];
 }): ParsedTemplateDetails {
   const {
     templateParams,
@@ -61,6 +71,7 @@ export function resolveTemplateMessage(options: {
     rawText,
     knownTemplates,
   } = options;
+  const sentCards: CarouselSendCard[] | undefined = options.carouselCards ?? content?.carouselCards;
 
   let templateName =
     options.templateName ||
@@ -91,10 +102,13 @@ export function resolveTemplateMessage(options: {
   let bodyText = content?.bodyText || content?.text || '';
   let footerText: string | undefined = content?.footerText;
   let buttons: ParsedTemplateDetails['buttons'] = content?.buttons || [];
+  let carouselCards: CarouselPreviewCard[] = [];
 
   if (template) {
     for (const comp of template.components) {
-      if (comp.type === 'HEADER') {
+      if (isCarouselComponent(comp)) {
+        carouselCards = cardsFromTemplateComponent(comp, sentCards);
+      } else if (comp.type === 'HEADER') {
         if (!headerType) {
           headerType = (comp.format as any) || (comp.text ? 'TEXT' : undefined);
         }
@@ -127,6 +141,11 @@ export function resolveTemplateMessage(options: {
         }
       }
     }
+  }
+
+  // Template definition unknown to the client: still show the cards that were sent.
+  if (carouselCards.length === 0 && Array.isArray(sentCards) && sentCards.length > 0) {
+    carouselCards = sentCards.map(previewCardFromSent);
   }
 
   // Parameter Interpolation: Replace {{1}}, {{2}}, etc. or {{name}}, etc.
@@ -164,5 +183,6 @@ export function resolveTemplateMessage(options: {
     bodyText,
     footerText,
     buttons,
+    carouselCards,
   };
 }

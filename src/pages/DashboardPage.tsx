@@ -21,6 +21,35 @@ import { Button } from '../components/common/Button';
 import { Spinner } from '../components/common/Tabs';
 import { formatRelativeTime } from '../lib/utils';
 
+const CAMPAIGN_TEXT_PREVIEW_LENGTH = 50;
+
+/** One-line summary of what a campaign sends, for the dashboard card. Never returns "undefined". */
+function describeCampaign(campaign: Campaign): string {
+  const definition = campaign.definition;
+  if (!definition) return 'No message content';
+
+  if ('steps' in definition) {
+    const count = Array.isArray(definition.steps) ? definition.steps.length : 0;
+    return `${count} drip sequence ${count === 1 ? 'step' : 'steps'}`;
+  }
+
+  if ('templateName' in definition && definition.templateName) {
+    const cards = definition.carouselCards?.length ?? 0;
+    return `Template: ${definition.templateName}${cards > 0 ? ` · ${cards}-card carousel` : ''}`;
+  }
+
+  if ('text' in definition && definition.text?.trim()) {
+    const text = definition.text.trim();
+    return text.length > CAMPAIGN_TEXT_PREVIEW_LENGTH
+      ? `${text.slice(0, CAMPAIGN_TEXT_PREVIEW_LENGTH)}…`
+      : text;
+  }
+
+  if (definition.flowId) return 'Runs a flow';
+
+  return 'No message content';
+}
+
 export const DashboardPage: React.FC = () => {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -335,11 +364,7 @@ export const DashboardPage: React.FC = () => {
                   </Badge>
                 </div>
                 <h4 className="text-xs font-bold text-gray-900">{camp.name}</h4>
-                <p className="text-[11px] text-gray-500">
-                  {camp.type === 'broadcast'
-                    ? (camp.definition as any)?.text?.substring(0, 50) + '...'
-                    : `${(camp.definition as any)?.steps?.length || 0} drip sequence steps`}
-                </p>
+                <p className="text-[11px] text-gray-500">{describeCampaign(camp)}</p>
               </div>
             ))
           )}

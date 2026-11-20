@@ -61,6 +61,7 @@ import type {
   ConversationSummary,
   IntentClassification,
   WhatsAppTemplate,
+  CarouselSendCard,
 } from '../types';
 import { useToast } from '../context/ToastContext';
 import { Badge } from '../components/common/Badge';
@@ -78,6 +79,12 @@ import { WhatsAppTemplateCard } from '../components/chat/WhatsAppTemplateCard';
 import { registerDynamicTemplates } from '../utils/whatsapp-templates';
 import { MEDIA_ACCEPT, validateMediaFile } from '../utils/media-limits';
 import { TemplateMediaUploader, TemplateMediaValue } from '../components/common/TemplateMediaUploader';
+import { CarouselSendEditor } from '../components/common/CarouselSendEditor';
+import {
+  buildInitialSendCards,
+  getCarouselComponent,
+  validateSendCards,
+} from '../utils/carousel-template';
 
 export const InboxPage: React.FC = () => {
   const { user } = useAuth();
@@ -188,6 +195,7 @@ export const InboxPage: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<WhatsAppTemplate | null>(null);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
   const [templateMedia, setTemplateMedia] = useState<TemplateMediaValue>({});
+  const [carouselCards, setCarouselCards] = useState<CarouselSendCard[]>([]);
   const [isSendingTemplate, setIsSendingTemplate] = useState(false);
 
   // Modals
@@ -784,6 +792,7 @@ export const InboxPage: React.FC = () => {
     setSelectedTemplate(null);
     setTemplateParams({});
     setTemplateMedia({});
+    setCarouselCards([]);
 
     try {
       if (channelId) {
@@ -841,6 +850,7 @@ export const InboxPage: React.FC = () => {
       mediaStorageKey: undefined,
       filename: undefined,
     });
+    setCarouselCards(getCarouselComponent(tpl) ? buildInitialSendCards(tpl) : []);
   };
 
   const handleSendTemplate = async () => {
@@ -860,6 +870,15 @@ export const InboxPage: React.FC = () => {
       }
     }
 
+    const isCarouselTemplate = !!getCarouselComponent(selectedTemplate);
+    if (isCarouselTemplate) {
+      const carouselError = validateSendCards(selectedTemplate, carouselCards);
+      if (carouselError) {
+        showToast(carouselError, 'error');
+        return;
+      }
+    }
+
     setIsSendingTemplate(true);
 
     try {
@@ -871,6 +890,7 @@ export const InboxPage: React.FC = () => {
         headerValue: finalHeaderValue,
         mediaStorageKey: templateMedia.mediaStorageKey,
         filename: templateMedia.filename,
+        carouselCards: isCarouselTemplate ? carouselCards : undefined,
       });
 
       setMessages((prev) => {
@@ -896,6 +916,7 @@ export const InboxPage: React.FC = () => {
       setSelectedTemplate(null);
       setTemplateParams({});
       setTemplateMedia({});
+      setCarouselCards([]);
       showToast(`Template "${selectedTemplate.name}" sent successfully`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to send template', 'error');
@@ -2628,6 +2649,15 @@ export const InboxPage: React.FC = () => {
                     </div>
                   )}
 
+                  {getCarouselComponent(selectedTemplate) && (
+                    <CarouselSendEditor
+                      template={selectedTemplate}
+                      value={carouselCards}
+                      onChange={setCarouselCards}
+                      disabled={isSendingTemplate}
+                    />
+                  )}
+
                   {/* Live WhatsApp Bubble Preview */}
                   <div>
                     <span className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
@@ -2647,6 +2677,7 @@ export const InboxPage: React.FC = () => {
                             bodyText: selectedTemplate.components?.find((c) => c.type === 'BODY')?.text,
                             footerText: selectedTemplate.components?.find((c) => c.type === 'FOOTER')?.text,
                             buttons: (selectedTemplate.components?.find((c) => c.type === 'BUTTONS') as any)?.buttons,
+                            carouselCards: carouselCards.length > 0 ? carouselCards : undefined,
                           },
                         }}
                         knownTemplates={channelTemplates}

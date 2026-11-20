@@ -21,6 +21,7 @@ import {
   CornerDownLeft,
   ChevronRight,
   Info,
+  GalleryHorizontal,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
@@ -30,6 +31,16 @@ import {
   WhatsAppTemplateLivePreview,
   WhatsAppTemplatePreviewData,
 } from './WhatsAppTemplateLivePreview';
+import { CarouselCardsEditor } from './CarouselCardsEditor';
+import { TemplateButtonFields } from './TemplateButtonFields';
+import {
+  CarouselFormState,
+  buildCarouselComponent,
+  createInitialCarouselState,
+  toPreviewCards,
+  validateCarouselForm,
+} from '../../utils/carousel-template';
+import { ButtonFormState, createButtonState } from '../../utils/template-buttons';
 import {
   Channel,
   TemplateCategory,
@@ -73,16 +84,7 @@ const COMMON_LANGUAGES = [
   { code: 'pl', label: 'Polish' },
 ];
 
-interface ButtonFormState {
-  id: string;
-  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE';
-  text: string;
-  url?: string;
-  urlType?: 'STATIC' | 'DYNAMIC';
-  urlSample?: string;
-  phoneNumber?: string;
-  code?: string;
-}
+type TemplateKind = 'STANDARD' | 'CAROUSEL';
 
 export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalProps> = ({
   isOpen,
@@ -95,6 +97,9 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
   const [name, setName] = useState('');
   const [category, setCategory] = useState<TemplateCategory>('MARKETING');
   const [language, setLanguage] = useState('en_US');
+  const [templateKind, setTemplateKind] = useState<TemplateKind>('STANDARD');
+  const [carousel, setCarousel] = useState<CarouselFormState>(createInitialCarouselState);
+  const isCarousel = templateKind === 'CAROUSEL';
 
   // 2. Header State
   const [headerType, setHeaderType] = useState<'NONE' | TemplateHeaderFormat>('NONE');
@@ -123,6 +128,8 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
       setName('');
       setCategory('MARKETING');
       setLanguage('en_US');
+      setTemplateKind('STANDARD');
+      setCarousel(createInitialCarouselState());
       setHeaderType('NONE');
       setHeaderText('');
       setHeaderSample('');
@@ -236,24 +243,7 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
     }
 
     setErrorMessage(null);
-    const newBtn: ButtonFormState = {
-      id: `btn-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      type,
-      text:
-        type === 'QUICK_REPLY'
-          ? 'Quick Reply'
-          : type === 'URL'
-          ? 'Visit Website'
-          : type === 'PHONE_NUMBER'
-          ? 'Call Support'
-          : 'Copy Code',
-      url: type === 'URL' ? 'https://example.com' : undefined,
-      urlType: 'STATIC',
-      urlSample: undefined,
-      phoneNumber: type === 'PHONE_NUMBER' ? '+1' : undefined,
-      code: type === 'COPY_CODE' ? 'OFFER20' : undefined,
-    };
-    setButtons([...buttons, newBtn]);
+    setButtons([...buttons, createButtonState(type)]);
   };
 
   const handleUpdateButton = (id: string, updates: Partial<ButtonFormState>) => {
@@ -289,6 +279,11 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
       if (!bodySamples[v] || !bodySamples[v].trim()) {
         return `Please provide a sample value for variable {{${v}}}.`;
       }
+    }
+
+    // Carousel templates have no top-level header, footer or buttons.
+    if (isCarousel) {
+      return validateCarouselForm(carousel);
     }
 
     // Check media header sample
@@ -339,8 +334,8 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
     try {
       const components: TemplateComponent[] = [];
 
-      // 1. Build HEADER component if specified
-      if (headerType !== 'NONE') {
+      // 1. Build HEADER component if specified (not used by carousel templates)
+      if (!isCarousel && headerType !== 'NONE') {
         if (headerType === 'TEXT') {
           const headerComp: TemplateComponent = {
             type: 'HEADER',
@@ -384,16 +379,16 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
       }
       components.push(bodyComp);
 
-      // 3. Build FOOTER component if specified
-      if (footerText.trim()) {
+      // 3. Build FOOTER component if specified (not used by carousel templates)
+      if (!isCarousel && footerText.trim()) {
         components.push({
           type: 'FOOTER',
           text: footerText.trim(),
         });
       }
 
-      // 4. Build BUTTONS component if any
-      if (buttons.length > 0) {
+      // 4. Build BUTTONS component if any (carousel buttons live inside the cards)
+      if (!isCarousel && buttons.length > 0) {
         const metaButtons: TemplateButton[] = buttons.map((btn) => {
           if (btn.type === 'QUICK_REPLY') {
             return {
@@ -435,10 +430,15 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
         });
       }
 
+      // 5. Build CAROUSEL component (always after the body)
+      if (isCarousel) {
+        components.push(buildCarouselComponent(carousel));
+      }
+
       const payload: CreateWhatsAppTemplatePayload = {
         name: name.trim().toLowerCase().replace(/\s+/g, '_'),
         language,
-        category,
+        category: isCarousel ? 'MARKETING' : category,
         components,
       };
 
@@ -468,17 +468,18 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
   // Preview Data binding
   const previewData: WhatsAppTemplatePreviewData = {
     name: name.toLowerCase().replace(/\s+/g, '_'),
-    category,
+    category: isCarousel ? 'MARKETING' : category,
     language,
-    headerType,
+    headerType: isCarousel ? 'NONE' : headerType,
     headerText,
     headerSample,
     headerMediaUrl: headerMedia.headerValue,
     headerFilename: headerMedia.filename,
     bodyText,
     bodySamples,
-    footerText,
-    buttons,
+    footerText: isCarousel ? '' : footerText,
+    buttons: isCarousel ? [] : buttons,
+    carouselCards: isCarousel ? toPreviewCards(carousel) : undefined,
     businessName: channel?.displayName || channel?.display_name || 'Omni Platform',
   };
 
@@ -500,6 +501,44 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                 <Sparkles className="w-4 h-4 text-primary-500" />
                 <span>1. General Information</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Template Type
+                </span>
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/70 dark:bg-slate-800 rounded-lg text-xs font-medium">
+                  {(
+                    [
+                      { kind: 'STANDARD', label: 'Standard', icon: FileText },
+                      { kind: 'CAROUSEL', label: 'Carousel', icon: GalleryHorizontal },
+                    ] as const
+                  ).map(({ kind, label, icon: KindIcon }) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => {
+                        setTemplateKind(kind);
+                        if (kind === 'CAROUSEL') setCategory('MARKETING');
+                        setErrorMessage(null);
+                      }}
+                      className={`py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-all ${
+                        templateKind === kind
+                          ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 font-semibold shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <KindIcon className="w-3.5 h-3.5" />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+                {isCarousel && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    A message with a scrollable row of 2–10 cards. Meta only allows carousels in the
+                    Marketing category.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -525,9 +564,10 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
                     Category
                   </label>
                   <select
-                    value={category}
+                    value={isCarousel ? 'MARKETING' : category}
                     onChange={(e) => setCategory(e.target.value as TemplateCategory)}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                    disabled={isCarousel}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 disabled:opacity-60"
                   >
                     <option value="MARKETING">MARKETING (Offers & Promotions)</option>
                     <option value="UTILITY">UTILITY (Orders, Alerts, Updates)</option>
@@ -554,7 +594,8 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
               </div>
             </div>
 
-            {/* Section 2: Header Configuration */}
+            {/* Section 2: Header Configuration (standard templates only) */}
+            {!isCarousel && (
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
@@ -641,13 +682,14 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
                 </div>
               )}
             </div>
+            )}
 
             {/* Section 3: Body & Variables */}
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                   <FileText className="w-4 h-4 text-emerald-500" />
-                  <span>3. Body Text & Variables <span className="text-rose-500">*</span></span>
+                  <span>{isCarousel ? '2' : '3'}. Body Text & Variables <span className="text-rose-500">*</span></span>
                 </div>
                 <span className="text-[11px] text-slate-500">
                   {bodyText.length} / 1024 chars
@@ -767,7 +809,8 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
               )}
             </div>
 
-            {/* Section 4: Footer */}
+            {/* Section 4: Footer (standard templates only) */}
+            {!isCarousel && (
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
@@ -790,8 +833,10 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
                 Small disclaimer subtext rendered at the bottom of your message. Variables and markdown are not supported in footers.
               </p>
             </div>
+            )}
 
-            {/* Section 5: Buttons */}
+            {/* Section 5: Buttons (standard templates only) */}
+            {!isCarousel && (
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
@@ -830,98 +875,10 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                            Button Label (Max 25 chars)
-                          </label>
-                          <input
-                            type="text"
-                            maxLength={25}
-                            value={btn.text}
-                            onChange={(e) =>
-                              handleUpdateButton(btn.id, { text: e.target.value })
-                            }
-                            placeholder="e.g. Track Package"
-                            className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
-                            required
-                          />
-                        </div>
-
-                        {btn.type === 'PHONE_NUMBER' && (
-                          <div className="space-y-1">
-                            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                              Phone Number (E.164)
-                            </label>
-                            <input
-                              type="text"
-                              value={btn.phoneNumber || ''}
-                              onChange={(e) =>
-                                handleUpdateButton(btn.id, { phoneNumber: e.target.value })
-                              }
-                              placeholder="+18005550199"
-                              className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
-                              required
-                            />
-                          </div>
-                        )}
-
-                        {btn.type === 'COPY_CODE' && (
-                          <div className="space-y-1">
-                            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                              Coupon / Offer Code
-                            </label>
-                            <input
-                              type="text"
-                              value={btn.code || ''}
-                              onChange={(e) =>
-                                handleUpdateButton(btn.id, { code: e.target.value })
-                              }
-                              placeholder="e.g. SUMMER2026"
-                              className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white font-mono"
-                              required
-                            />
-                          </div>
-                        )}
-
-                        {btn.type === 'URL' && (
-                          <>
-                            <div className="space-y-1 sm:col-span-2">
-                              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                                Website URL (supports {'{{1}}'} for dynamic links)
-                              </label>
-                              <input
-                                type="text"
-                                value={btn.url || ''}
-                                onChange={(e) =>
-                                  handleUpdateButton(btn.id, { url: e.target.value })
-                                }
-                                placeholder="https://example.com/orders/{{1}}"
-                                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
-                                required
-                              />
-                            </div>
-
-                            {btn.url?.includes('{{1}}') && (
-                              <div className="space-y-1 sm:col-span-2 bg-primary-50/50 dark:bg-primary-950/20 p-2 rounded-md border border-primary-200/50 dark:border-primary-800/40">
-                                <label className="block text-[10.5px] font-semibold text-primary-900 dark:text-primary-200">
-                                  Sample URL for Meta Review <span className="text-rose-500">*</span>
-                                </label>
-                                <input
-                                  type="text"
-                                  value={btn.urlSample || ''}
-                                  onChange={(e) =>
-                                    handleUpdateButton(btn.id, { urlSample: e.target.value })
-                                  }
-                                  placeholder="https://example.com/orders/12345"
-                                  className="w-full px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-primary-300 dark:border-primary-700 rounded-md focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
-                                  required
-                                />
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
+                      <TemplateButtonFields
+                        button={btn}
+                        onChange={(updates) => handleUpdateButton(btn.id, updates)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -988,6 +945,23 @@ export const WhatsAppTemplateCreateModal: React.FC<WhatsAppTemplateCreateModalPr
                 </div>
               )}
             </div>
+            )}
+
+            {/* Section 3 (carousel): Cards */}
+            {isCarousel && (
+              <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                    <GalleryHorizontal className="w-4 h-4 text-purple-500" />
+                    <span>3. Carousel Cards <span className="text-rose-500">*</span></span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {carousel.cards.length} / 10 cards
+                  </span>
+                </div>
+                <CarouselCardsEditor value={carousel} onChange={setCarousel} />
+              </div>
+            )}
           </div>
 
           {/* RIGHT COLUMN: Live Device Preview (Sticky) */}
