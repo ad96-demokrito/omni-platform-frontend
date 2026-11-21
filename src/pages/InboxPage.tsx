@@ -642,6 +642,36 @@ export const InboxPage: React.FC = () => {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  // A template message (e.g. one sent by a campaign) renders its text and carousel cards from the
+  // template's definition, which the client only had once the "Send template" modal was opened.
+  // Load it once per channel as soon as the open conversation holds a template message.
+  const [loadedTemplatesChannelId, setLoadedTemplatesChannelId] = useState<string | null>(null);
+  const hasTemplateMessage = messages.some((m) => m.type === 'template');
+  const activeChannelId: string | undefined =
+    activeConversation?.channelId || (activeConversation as any)?.channel_id;
+  const activeChannelType: string | undefined =
+    activeConversation?.channelType || (activeConversation as any)?.channel_type;
+
+  useEffect(() => {
+    if (!hasTemplateMessage || !activeChannelId || activeChannelType !== 'whatsapp') return;
+    if (loadedTemplatesChannelId === activeChannelId) return;
+
+    let cancelled = false;
+    channelsApi
+      .getTemplates(activeChannelId)
+      .then((templates) => {
+        registerDynamicTemplates(templates);
+        // Changing state re-renders the template bubbles, which read the registry.
+        if (!cancelled) setLoadedTemplatesChannelId(activeChannelId);
+      })
+      .catch((err) => {
+        console.warn('[InboxPage] Could not load templates to render template messages:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasTemplateMessage, activeChannelId, activeChannelType, loadedTemplatesChannelId]);
+
   // Real-time calculation and tick of 24h WhatsApp session window
   useEffect(() => {
     if (!activeConversation) {
