@@ -361,6 +361,14 @@ export const InboxPage: React.FC = () => {
       return;
     }
 
+    // Switching chats must never leave the previous chat's contact/deals/orders in the details panel
+    // (the panel shows `contact.name` before the conversation's own name), and a slow response for
+    // the chat we just left must not overwrite the one we are on.
+    let cancelled = false;
+    setContact(null);
+    setDeals([]);
+    setOrders([]);
+
     const loadMessagesAndContact = async () => {
       stickToBottomRef.current = true;
       setIsLoadingMessages(true);
@@ -373,18 +381,24 @@ export const InboxPage: React.FC = () => {
         // Load contact details, deals & orders
         const currentConv = conversations.find((c) => c.id === selectedConvId);
         if (currentConv?.contactId) {
-          const contactList = await contactsApi.list(100, 0);
+          // Look the contact up by its number: the plain list only holds the newest 100 contacts,
+          // so an older contact (or a new one on a busy account) would never be found.
+          const contactList = await contactsApi.list(
+            100,
+            0,
+            currentConv.contactExternalId ? { search: currentConv.contactExternalId } : {}
+          );
           const currentContact = contactList.find((c) => c.id === currentConv.contactId);
-          if (currentContact) setContact(currentContact);
+          if (currentContact && !cancelled) setContact(currentContact);
 
           const allDeals = await dealsApi.list();
-          setDeals(allDeals.filter((d) => d.contactId === currentConv.contactId));
+          if (!cancelled) setDeals(allDeals.filter((d) => d.contactId === currentConv.contactId));
 
           try {
             const ordersRes = await ordersApi.list({ contactId: currentConv.contactId });
-            setOrders(ordersRes.orders || []);
+            if (!cancelled) setOrders(ordersRes.orders || []);
           } catch {
-            setOrders([]);
+            if (!cancelled) setOrders([]);
           }
         } else {
           setDeals([]);
@@ -398,6 +412,9 @@ export const InboxPage: React.FC = () => {
     };
 
     loadMessagesAndContact();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedConvId]);
 
   // Scroll once the messages are actually rendered. A fixed timer fires too early on a real network,
