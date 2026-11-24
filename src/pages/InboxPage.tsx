@@ -2262,6 +2262,13 @@ export const InboxPage: React.FC = () => {
                             </div>
                           )}
 
+                          {/* Reply to a carousel card button: say which card it was on */}
+                          {msg.content?.carouselCard?.index && (
+                            <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                              Reply to carousel card {msg.content.carouselCard.index}
+                            </p>
+                          )}
+
                           {/* Message Text (Hide placeholder [Image]/[Audio] if media is rendered directly) */}
                           {(!mediaUrl || (!isImage && !isVideo && !isAudio && !isDocument) || (msg.text && !['[Image]', '[Audio]', '[Video]', '[Sticker]', '[Document]'].includes(msg.text.trim()) && !msg.text.startsWith('[Template:'))) && !isOrder && (
                             <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
