@@ -11,7 +11,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (tenantName: string, email: string, password: string) => Promise<void>;
+  signup: (tenantName: string, email: string, password: string, country?: string) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
   updateProfile: (data: UpdateProfileData) => Promise<UserProfile>;
@@ -124,10 +124,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signup = async (tenantName: string, email: string, password: string) => {
+  const signup = async (tenantName: string, email: string, password: string, country?: string) => {
     setIsLoading(true);
     try {
-      const response = await authApi.signup({ tenantName, email, password });
+      const response = await authApi.signup({ tenantName, email, password, country });
       const payload = parseJwtPayload(response.token);
 
       const baseUser: User = {

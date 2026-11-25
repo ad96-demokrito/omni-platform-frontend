@@ -1722,41 +1722,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
 
             <Card className="p-6 bg-white border border-gray-200 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-1">
-                  <p className="font-bold text-gray-900">Free Sandbox</p>
-                  <p className="text-lg font-black text-gray-900">$0</p>
-                  <p className="text-[11px] text-gray-500">1 Channel • 500 Contacts • 2K Msgs/mo</p>
-                </div>
-
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-1">
-                  <p className="font-bold text-primary-700">Starter Growth</p>
-                  <p className="text-lg font-black text-gray-900">$29<span className="text-xs font-normal text-gray-500">/mo</span></p>
-                  <p className="text-[11px] text-gray-500">3 Channels • 3,000 Contacts • 25K Msgs/mo</p>
-                </div>
-
-                <div className="p-3 bg-primary-50 rounded-xl border border-primary-200 space-y-1 shadow-xs">
-                  <div className="flex items-center justify-between">
-                    <p className="font-bold text-primary-800">Pro Scale</p>
-                    <Badge variant="primary" size="sm" className="text-[9px]">Popular</Badge>
-                  </div>
-                  <p className="text-lg font-black text-primary-900">$99<span className="text-xs font-normal text-gray-500">/mo</span></p>
-                  <p className="text-[11px] text-gray-600">10 Channels • 25,000 Contacts • 100K Msgs/mo</p>
-                </div>
-
-                <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-1">
-                  <p className="font-bold text-purple-800">Enterprise Custom</p>
-                  <p className="text-lg font-black text-purple-900">$299<span className="text-xs font-normal text-gray-500">/mo</span></p>
-                  <p className="text-[11px] text-gray-600">50 Channels • 500,000 Contacts • 1M Msgs/mo</p>
-                </div>
+              <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-2 text-xs">
+                <h4 className="font-bold text-gray-900">Plans &amp; Pricing</h4>
+                <p className="text-gray-600">
+                  Plans (Free Sandbox, Starter Growth, Pro Scale and Enterprise Custom) and their limits for channels,
+                  contacts, monthly messages and AI queries are listed under <strong>Settings → Usage &amp; Plans</strong>,
+                  always with the current price. You are billed in the currency of your billing country:
+                  <strong> ₹ INR</strong> in India (GST is added at checkout) and <strong>$ USD</strong> everywhere else.
+                  Set your country under <strong>Settings → Usage &amp; Plans → Billing details</strong>; it is locked after your first payment.
+                </p>
               </div>
 
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-2 text-xs">
                 <h4 className="font-bold text-gray-900">Supported Payment Methods</h4>
                 <ul className="list-disc list-inside text-gray-600 space-y-1">
-                  <li><strong>Stripe Checkout:</strong> Credit cards, Apple Pay, Google Pay, SEPA Direct Debit.</li>
-                  <li><strong>Razorpay Payments:</strong> UPI, Netbanking, Credit/Debit cards for South Asian regions.</li>
-                  <li><strong>Instant Sandbox:</strong> 1-click zero-risk simulation for testing tier upgrades immediately.</li>
+                  <li><strong>India (₹ INR):</strong> Razorpay — UPI, netbanking and credit/debit cards.</li>
+                  <li><strong>International ($ USD):</strong> Stripe Checkout — credit/debit cards and wallets.</li>
+                  <li>The payment method is chosen automatically from your billing country.</li>
                 </ul>
               </div>
             </Card>

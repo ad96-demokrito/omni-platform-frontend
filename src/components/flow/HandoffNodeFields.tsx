@@ -79,7 +79,8 @@ export const HandoffNodeFields: React.FC<HandoffNodeFieldsProps> = ({ value, onC
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([teamsApi.list(), teamApi.list(), teamsApi.getSettings()])
+    // Support teams are a plan feature: a plan without them simply has no teams to pick from.
+    Promise.all([teamsApi.list().catch((): Team[] => []), teamApi.list(), teamsApi.getSettings()])
       .then(([teamList, members, settings]) => {
         if (cancelled) return;
         setTeams(teamList);

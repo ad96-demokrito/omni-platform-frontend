@@ -1145,34 +1145,154 @@ export interface CreatedApiKeyResult extends ApiKey {
   secretKey: string;
 }
 
+/** One currency's price for a plan. */
+export interface PlanPrice {
+  currency: string;
+  priceMonthly: number;
+  priceYearly: number;
+  isActive: boolean;
+}
+
+/** Gated features a plan can include (plan/017 Phase 4). */
+export interface PlanFeatureFlags {
+  ai_copilot: boolean;
+  api_keys: boolean;
+  audit_compliance: boolean;
+  teams_roles: boolean;
+}
+
 export interface PlanConfig {
   id: string;
   name: string;
   description: string;
+  /** Price in `currency`, which is the workspace's billing currency. */
   priceMonthly: number;
   priceYearly?: number;
   currency?: string;
+  /** False when the plan has no price in the workspace's currency: it cannot be bought. */
+  priceAvailable?: boolean;
+  prices?: PlanPrice[];
   maxChannels: number;
   maxContacts: number;
   maxMonthlyMessages: number;
   maxMonthlyAiQueries: number;
   features: string[];
+  /** The gated features this plan includes. */
+  featureFlags?: PlanFeatureFlags;
   badgeText?: string | null;
 }
 
-export interface CheckoutSessionResponse {
+/** Price breakdown the server computed for a checkout (prices are exclusive of tax). */
+export interface CheckoutBreakdown {
+  subtotal: number;
+  taxAmount: number;
+  /** Percent; 0 when no tax applies. */
+  taxRate: number;
+  taxLabel: string | null;
+}
+
+export interface CheckoutSessionResponse extends CheckoutBreakdown {
+  /** The payment provider's session id (also what the browser returns with after paying). */
   sessionId: string;
   checkoutUrl?: string;
-  paymentLink?: string;
-  gateway: 'stripe' | 'razorpay' | 'sandbox';
+  /** Chosen by the server from the billing currency; "free" when a free plan was activated at once. */
+  gateway: 'stripe' | 'razorpay' | 'sandbox' | 'free';
   planId: string;
   planName: string;
+  /** What is charged now: the invoice total minus any upgrade credit (and at every renewal when `autoRenew`). */
   amount: number;
+  /** The full invoice for the new plan. Equals `amount` unless an upgrade credit is applied. */
+  invoiceTotal: number;
+  /** An upgrade: the unused time of the current plan, credited by a credit note issued with the new invoice. */
+  credit: { total: number; subtotal: number; tax: number; invoiceNumber: string; unusedDays: number } | null;
   currency: string;
   billingCycle: 'monthly' | 'yearly';
+  /** True when the plan renews by itself every cycle until cancelled. */
+  autoRenew: boolean;
   isFree: boolean;
   isSandbox: boolean;
   notes?: string;
+  /** Present when a free plan was activated immediately. */
+  activated?: Pick<SubscriptionPaymentResult, 'payment' | 'subscription'>;
+}
+
+/** What an upgrade would cost right now: the new plan, the credit for the unused time of the current plan, the rest. */
+export interface UpgradeQuote {
+  currency: string;
+  planId: string;
+  planName: string;
+  billingCycle: 'monthly' | 'yearly';
+  subtotal: number;
+  taxAmount: number;
+  taxRate: number;
+  taxLabel: string | null;
+  /** The full invoice for the new plan (subtotal + tax). */
+  invoiceTotal: number;
+  credit: {
+    invoiceNumber: string;
+    unusedDays: number;
+    periodEnd: string;
+    subtotal: number;
+    tax: number;
+    total: number;
+  } | null;
+  /** What is charged now. */
+  payable: number;
+  /** Why the change is not possible right now (null when it is). */
+  blocked: { reason: 'lower_plan' | 'credit_exceeds_price'; message: string; activeUntil: string } | null;
+}
+
+/** A credit note: reduces an invoice (a refund, or the credit of an upgrade). */
+export interface CreditNoteRecord {
+  id: string;
+  creditNoteNumber: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  appliedToInvoiceNumber: string | null;
+  kind: 'upgrade_credit' | 'refund' | 'cancellation' | 'correction';
+  reason: string;
+  currency: string;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+  issuedAt: string;
+  hasPdf: boolean;
+}
+
+/** The workspace's auto-renewing subscription. */
+export interface SubscriptionSummary {
+  id: string;
+  status: 'active' | 'past_due' | 'cancelled' | 'expired';
+  planId: string;
+  planName: string;
+  billingCycle: 'monthly' | 'yearly';
+  currency: string;
+  /** What each renewal charges (tax included). */
+  amount: number;
+  subtotal: number;
+  taxAmount: number;
+  taxRate: number;
+  gateway: 'stripe' | 'razorpay' | 'sandbox';
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  /** Cancelled by the customer: nothing renews, the plan stays active until `currentPeriodEnd`. */
+  cancelAtPeriodEnd: boolean;
+  /** Card (Stripe) subscriptions can open a hosted page to change the card. */
+  canManageCard: boolean;
+}
+
+/** Where a checkout stands; the plan only changes once the provider confirms the payment. */
+export interface CheckoutStatusResponse {
+  status: 'pending' | 'paid' | 'failed' | 'expired';
+  sessionId: string;
+  planId: string;
+  billingCycle: string;
+  currency: string;
+  amount: number;
+  autoRenew?: boolean;
+  message: string;
+  payment?: SubscriptionPaymentResult['payment'];
+  subscription?: SubscriptionPaymentResult['subscription'];
 }
 
 export interface SubscriptionPaymentResult {
@@ -1189,6 +1309,11 @@ export interface SubscriptionPaymentResult {
     periodStart: string;
     periodEnd: string;
     createdAt: string;
+    planName?: string;
+    subtotal?: number;
+    taxAmount?: number;
+    taxRate?: number;
+    taxLabel?: string | null;
   };
   subscription?: {
     tenantId: string;
@@ -1226,6 +1351,23 @@ export interface InvoiceRecord {
   periodStart: string;
   periodEnd: string;
   notes: string | null;
+  /** Before tax; `amount` is the total charged. */
+  subtotal?: number;
+  taxAmount?: number;
+  taxRate?: number;
+  taxLabel?: string | null;
+  buyerTaxId?: string | null;
+  sellerTaxId?: string | null;
+  /** The tax split (they add up to `taxAmount`). */
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
+  placeOfSupply?: string | null;
+  /** null = a legacy receipt issued before GST tax invoices. */
+  supplyType?: 'b2b' | 'b2c' | 'export' | null;
+  /** True once the invoice PDF has been created. */
+  hasPdf?: boolean;
+  emailStatus?: 'none' | 'pending' | 'sent' | 'failed';
   createdAt: string;
 }
 
@@ -1237,6 +1379,15 @@ export interface WorkspaceUsageSummary {
   planStatus: string;
   planExpiresAt?: string | null;
   billingCycleEnd: string;
+  billingCountry?: string | null;
+  billingCurrency?: string;
+  /** True after the first paid payment: the country/currency can then only be changed by support. */
+  currencyLocked?: boolean;
+  /** Tax added on top of plan prices for this workspace (GST for India). */
+  tax?: { ratePercent: number; label: string | null };
+  /** What the current plan includes, and whether the server enforces plan limits (off | warn | enforce). */
+  features?: PlanFeatureFlags;
+  enforcement?: 'off' | 'warn' | 'enforce';
   metrics: {
     channels: UsageMetric;
     contacts: UsageMetric;
@@ -1250,6 +1401,17 @@ export interface WorkspaceUsageSummary {
     activeAgentsCount: number;
   };
   availablePlans: PlanConfig[];
+}
+
+export interface BillingProfile {
+  country: string | null;
+  currency: string;
+  taxId: string | null;
+  name: string | null;
+  address: Record<string, string> | null;
+  /** GST state code (place of supply); required to pay in INR. */
+  stateCode: string | null;
+  currencyLocked: boolean;
 }
 
 export interface AuditLogEntry {

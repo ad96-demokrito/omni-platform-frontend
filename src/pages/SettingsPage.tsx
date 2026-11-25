@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Users,
@@ -30,7 +30,6 @@ import {
   ArrowRight,
   ExternalLink,
   Calendar,
-  DollarSign,
 } from 'lucide-react';
 import {
   teamApi,
@@ -49,14 +48,21 @@ import type {
   AuditLogEntry,
   PlanConfig,
   CheckoutSessionResponse,
+  CheckoutStatusResponse,
   SubscriptionPaymentResult,
   InvoiceRecord,
+  UpgradeQuote,
+  CreditNoteRecord,
 } from '../types';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { useDialog } from '../context/DialogContext';
 import { TeamsManager } from '../components/settings/TeamsManager';
 import { AutoAssignSetting } from '../components/settings/AutoAssignSetting';
+import { BillingProfileCard } from '../components/settings/BillingProfileCard';
+import { SubscriptionCard } from '../components/billing/SubscriptionCard';
+import { PLAN_FEATURE_LABELS } from '../utils/planFeatures';
+import { downloadBlob } from '../utils/download';
 import { Card, CardHeader, CardTitle, CardDescription } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -64,6 +70,7 @@ import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { Tabs, Spinner } from '../components/common/Tabs';
 import { formatRelativeTime, getUserInitials } from '../lib/utils';
+import { formatLimit, formatMoney, previewTax, yearlySavingsPercent } from '../utils/money';
 
 export const SettingsPage: React.FC = () => {
   const { user, updateProfile, refreshProfile } = useAuth();
@@ -125,12 +132,22 @@ export const SettingsPage: React.FC = () => {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [isBillingLoading, setIsBillingLoading] = useState(false);
   const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState<InvoiceRecord | null>(null);
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [creditNotes, setCreditNotes] = useState<CreditNoteRecord[]>([]);
+  // What an upgrade would cost right now (credit for the unused time of the current plan). null while loading.
+  const [upgradeQuote, setUpgradeQuote] = useState<UpgradeQuote | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [selectedPlanForUpgrade, setSelectedPlanForUpgrade] = useState<PlanConfig | null>(null);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [selectedGateway, setSelectedGateway] = useState<'stripe' | 'razorpay' | 'sandbox'>('stripe');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  // Stops two status checks (the timer and a button click) from running at the same time.
+  const statusCheckInFlight = useRef(false);
+  // The return-from-payment-page handling must run once, even when React re-runs effects in development.
+  const handledCheckoutReturn = useRef(false);
+  // Renew the plan automatically every cycle (a subscription) instead of paying once. On by default.
+  const [autoRenew, setAutoRenew] = useState(true);
+  const [completedAutoRenew, setCompletedAutoRenew] = useState(false);
   const [checkoutSession, setCheckoutSession] = useState<CheckoutSessionResponse | null>(null);
   const [paymentSuccessResult, setPaymentSuccessResult] = useState<SubscriptionPaymentResult | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<'plan_select' | 'payment_gateway' | 'completed'>('plan_select');
@@ -173,15 +190,41 @@ export const SettingsPage: React.FC = () => {
     }
   }, [showToast]);
 
+  const handleDownloadInvoice = async (invoice: InvoiceRecord) => {
+    setDownloadingInvoiceId(invoice.id);
+    try {
+      const file = await billingApi.downloadInvoicePdf(invoice.id);
+      downloadBlob(file, `${invoice.invoiceNumber.replace(/[^A-Za-z0-9-]+/g, '-')}.pdf`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not download the invoice', 'error');
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
+
+  const handleDownloadCreditNote = async (note: CreditNoteRecord) => {
+    setDownloadingInvoiceId(note.id);
+    try {
+      const file = await billingApi.downloadCreditNotePdf(note.id);
+      downloadBlob(file, `${note.creditNoteNumber.replace(/[^A-Za-z0-9-]+/g, '-')}.pdf`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not download the credit note', 'error');
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
+
   const loadBilling = useCallback(async () => {
     try {
       setIsBillingLoading(true);
-      const [usageRes, invoicesRes] = await Promise.all([
+      const [usageRes, invoicesRes, creditNotesRes] = await Promise.all([
         billingApi.getUsage(),
         billingApi.getInvoices().catch(() => ({ invoices: [] })),
+        billingApi.getCreditNotes().catch(() => ({ creditNotes: [] })),
       ]);
       setUsageSummary(usageRes);
       setInvoices(invoicesRes?.invoices || []);
+      setCreditNotes(creditNotesRes?.creditNotes || []);
     } catch (err: any) {
       showToast(err.message || 'Failed to load usage summary', 'error');
     } finally {
@@ -395,64 +438,124 @@ export const SettingsPage: React.FC = () => {
     setCheckoutStep('plan_select');
     setCheckoutSession(null);
     setPaymentSuccessResult(null);
+    setAutoRenew(true);
     setIsPlanModalOpen(true);
   };
+
+  // Plans are shown in the workspace's billing currency; one without a price in it cannot be bought.
+  const billingCurrency = usageSummary?.billingCurrency || 'USD';
+  const visiblePlans = (usageSummary?.availablePlans ?? []).filter((plan) => plan.priceAvailable !== false);
+  const bestYearlySavings = Math.max(
+    0,
+    ...visiblePlans.map((plan) => yearlySavingsPercent(plan.priceMonthly || 0, plan.priceYearly ?? (plan.priceMonthly || 0) * 10))
+  );
+
+  // Shows the completion screen from a payment the SERVER confirmed (never from anything the browser claims).
+  const completeCheckout = async (status: CheckoutStatusResponse) => {
+    setPaymentSuccessResult({
+      success: true,
+      message: status.message,
+      payment: status.payment,
+      subscription: status.subscription,
+    });
+    setCompletedAutoRenew(status.autoRenew === true);
+    setCheckoutStep('completed');
+    showToast('Payment received. Your plan is active.', 'success');
+    await loadBilling();
+    await refreshProfile();
+  };
+
+  // Asks the server whether a checkout was paid (it asks the payment provider). Resolves true once the checkout
+  // is settled (paid, failed or expired) so polling can stop.
+  const checkPaymentStatus = async (sessionId: string, options: { silent?: boolean } = {}): Promise<boolean> => {
+    if (statusCheckInFlight.current) return false;
+    statusCheckInFlight.current = true;
+    try {
+      if (!options.silent) setIsVerifyingPayment(true);
+      const status = await billingApi.getCheckoutStatus(sessionId);
+      if (status.status === 'paid') {
+        await completeCheckout(status);
+        return true;
+      }
+      if (status.status === 'failed' || status.status === 'expired') {
+        showToast(status.message, 'error');
+        setCheckoutStep('plan_select');
+        return true;
+      }
+      if (!options.silent) showToast(status.message, 'info');
+      return false;
+    } catch (err: any) {
+      if (!options.silent) showToast(err.message || 'Could not check the payment', 'error');
+      return false;
+    } finally {
+      statusCheckInFlight.current = false;
+      if (!options.silent) setIsVerifyingPayment(false);
+    }
+  };
+
+  // Ask the server what this plan costs today: a bigger plan credits the unused time of the current one.
+  useEffect(() => {
+    if (!isPlanModalOpen || !selectedPlanForUpgrade || checkoutStep !== 'plan_select') return;
+    const price = billingCycle === 'yearly' ? selectedPlanForUpgrade.priceYearly ?? 0 : selectedPlanForUpgrade.priceMonthly || 0;
+    if (price <= 0) {
+      setUpgradeQuote(null);
+      return;
+    }
+    let cancelled = false;
+    setUpgradeQuote(null);
+    billingApi
+      .getUpgradeQuote(selectedPlanForUpgrade.id, billingCycle)
+      .then((quote) => {
+        if (!cancelled) setUpgradeQuote(quote);
+      })
+      .catch(() => {
+        // The quote is a preview: without it the modal falls back to the plain price and the server still decides.
+        if (!cancelled) setUpgradeQuote(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlanModalOpen, selectedPlanForUpgrade, billingCycle, checkoutStep]);
 
   const handleStartCheckout = async () => {
     if (!selectedPlanForUpgrade) return;
 
-    const priceMonthly = selectedPlanForUpgrade.priceMonthly || 0;
-    const priceYearly = selectedPlanForUpgrade.priceYearly !== undefined ? selectedPlanForUpgrade.priceYearly : priceMonthly * 10;
-    const amount = billingCycle === 'yearly' ? priceYearly : priceMonthly;
-
     try {
       setIsCheckingOut(true);
 
-      if (amount <= 0) {
-        // Instant activation for Free Tier
-        const verifyRes = await billingApi.verifyPayment({
-          planId: selectedPlanForUpgrade.id,
-          billingCycle,
-          gateway: 'sandbox',
-          paymentReference: `free_act_${Date.now()}`,
+      // The server decides the price, tax and payment provider; we only say which plan and cycle.
+      const session = await billingApi.createCheckoutSession({
+        planId: selectedPlanForUpgrade.id,
+        billingCycle,
+        // An upgrade with credit is paid once; the server refuses it as a subscription.
+        autoRenew: autoRenew && !upgradeQuote?.credit,
+      });
+      setCheckoutSession(session);
+
+      if (session.isFree && session.activated) {
+        // A free plan is active immediately: there is no payment to wait for.
+        setPaymentSuccessResult({
+          success: true,
+          message: session.notes || `Workspace switched to ${selectedPlanForUpgrade.name}.`,
+          payment: session.activated.payment,
+          subscription: session.activated.subscription,
         });
-        setPaymentSuccessResult(verifyRes);
         setCheckoutStep('completed');
-        showToast(`Workspace upgraded to ${selectedPlanForUpgrade.name}!`, 'success');
+        showToast(`Workspace switched to ${selectedPlanForUpgrade.name}!`, 'success');
         await loadBilling();
         await refreshProfile();
         return;
       }
 
-      // Initiate SaaS checkout session
-      const session = await billingApi.createCheckoutSession({
-        planId: selectedPlanForUpgrade.id,
-        billingCycle,
-        gateway: selectedGateway,
-        successUrl: window.location.href,
-        cancelUrl: window.location.href,
-      });
+      if (session.gateway === 'sandbox') {
+        // Development-only fake gateway: the server confirms it on the spot.
+        await checkPaymentStatus(session.sessionId);
+        return;
+      }
 
-      setCheckoutSession(session);
-
-      if (selectedGateway === 'sandbox') {
-        // Auto-verify payment for Sandbox mode
-        const verifyRes = await billingApi.verifyPayment({
-          planId: selectedPlanForUpgrade.id,
-          billingCycle,
-          gateway: 'sandbox',
-          paymentReference: `sim_${session.sessionId}`,
-        });
-        setPaymentSuccessResult(verifyRes);
-        setCheckoutStep('completed');
-        showToast(`Workspace upgraded to ${selectedPlanForUpgrade.name}!`, 'success');
-        await loadBilling();
-        await refreshProfile();
-      } else {
-        setCheckoutStep('payment_gateway');
-        if (session.checkoutUrl) {
-          window.open(session.checkoutUrl, '_blank', 'noopener,noreferrer');
-        }
+      setCheckoutStep('payment_gateway');
+      if (session.checkoutUrl) {
+        window.open(session.checkoutUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to initiate checkout', 'error');
@@ -461,28 +564,69 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleVerifyGatewayPayment = async (referenceOverride?: string) => {
-    if (!selectedPlanForUpgrade) return;
-    try {
-      setIsVerifyingPayment(true);
-      const ref = referenceOverride || checkoutSession?.sessionId || `tx_ref_${Date.now()}`;
-      const verifyRes = await billingApi.verifyPayment({
-        planId: selectedPlanForUpgrade.id,
-        billingCycle,
-        gateway: selectedGateway,
-        paymentReference: ref,
-      });
-      setPaymentSuccessResult(verifyRes);
-      setCheckoutStep('completed');
-      showToast(`Payment verified & Workspace upgraded to ${selectedPlanForUpgrade.name}!`, 'success');
-      await loadBilling();
-      await refreshProfile();
-    } catch (err: any) {
-      showToast(err.message || 'Payment verification failed', 'error');
-    } finally {
-      setIsVerifyingPayment(false);
+  // While the customer pays in the other tab, ask the server every few seconds. The plan activates as soon as the
+  // provider confirms (the provider's webhook usually gets there first, so this mostly just notices it).
+  useEffect(() => {
+    if (checkoutStep !== 'payment_gateway' || !checkoutSession) return;
+    const POLL_INTERVAL_MS = 4000;
+    const MAX_POLLS = 225; // about 15 minutes
+    let polls = 0;
+    const timer = setInterval(async () => {
+      polls += 1;
+      const settled = await checkPaymentStatus(checkoutSession.sessionId, { silent: true });
+      if (settled || polls >= MAX_POLLS) clearInterval(timer);
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+    // checkPaymentStatus only reads refs and stable setters; re-subscribing on every render would reset the timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutStep, checkoutSession]);
+
+  // Back from the payment page (Stripe adds ?session_id=, Razorpay ?razorpay_payment_link_id=): confirm it.
+  useEffect(() => {
+    const outcome = searchParams.get('checkout');
+    if (!outcome || handledCheckoutReturn.current) return;
+    handledCheckoutReturn.current = true;
+
+    const clearCheckoutParams = () => {
+      const next = new URLSearchParams(searchParams);
+      [
+        'checkout',
+        'session_id',
+        'razorpay_payment_id',
+        'razorpay_payment_link_id',
+        'razorpay_payment_link_reference_id',
+        'razorpay_payment_link_status',
+        'razorpay_signature',
+      ].forEach((key) => next.delete(key));
+      setSearchParams(next, { replace: true });
+    };
+
+    if (outcome === 'cancel') {
+      showToast('Payment cancelled. Your plan was not changed.', 'info');
+      clearCheckoutParams();
+      return;
     }
-  };
+
+    const sessionId = searchParams.get('session_id') || searchParams.get('razorpay_payment_link_id');
+    if (outcome !== 'success' || !sessionId) {
+      clearCheckoutParams();
+      return;
+    }
+
+    (async () => {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (await checkPaymentStatus(sessionId, { silent: true })) {
+          clearCheckoutParams();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+      showToast("We haven't received confirmation of your payment yet. Your plan updates by itself once it is confirmed.", 'info');
+      clearCheckoutParams();
+    })();
+    // Runs once on arrival; the ref guard makes a development double-run harmless.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ==================== GDPR ACTIONS ====================
   const handleExportGdpr = async () => {
@@ -1190,19 +1334,23 @@ export const SettingsPage: React.FC = () => {
                       }`}
                     >
                       <span>Annual Billing</span>
-                      <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                        Save ~17%
-                      </span>
+                      {bestYearlySavings > 0 && (
+                        <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                          Save ~{bestYearlySavings}%
+                        </span>
+                      )}
                     </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                  {usageSummary.availablePlans.map((plan) => {
+                  {visiblePlans.map((plan) => {
                     const isCurrent = usageSummary.planId === plan.id;
                     const priceMonthly = plan.priceMonthly || 0;
                     const priceYearly = plan.priceYearly !== undefined ? plan.priceYearly : priceMonthly * 10;
                     const displayPrice = billingCycle === 'yearly' ? priceYearly : priceMonthly;
+                    const planCurrency = plan.currency || billingCurrency;
+                    const planSavings = yearlySavingsPercent(priceMonthly, priceYearly);
 
                     return (
                       <div
@@ -1236,14 +1384,14 @@ export const SettingsPage: React.FC = () => {
 
                           <div>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-3xl font-extrabold text-gray-900">${displayPrice}</span>
+                              <span className="text-3xl font-extrabold text-gray-900">{formatMoney(displayPrice, planCurrency, { compact: true })}</span>
                               <span className="text-xs text-gray-500">
                                 {displayPrice === 0 ? 'forever' : billingCycle === 'yearly' ? '/ year' : '/ month'}
                               </span>
                             </div>
                             {billingCycle === 'yearly' && displayPrice > 0 && (
                               <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
-                                Equivalent to ${(displayPrice / 12).toFixed(1)}/mo (2 months free)
+                                Equivalent to {formatMoney(displayPrice / 12, planCurrency)}/mo{planSavings > 0 ? ` (save ${planSavings}%)` : ''}
                               </p>
                             )}
                           </div>
@@ -1251,20 +1399,27 @@ export const SettingsPage: React.FC = () => {
                           <div className="space-y-2 pt-2 border-t border-gray-100 text-xs">
                             <div className="flex items-center gap-2 text-gray-700">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span><strong>{plan.maxChannels}</strong> Connected Channels</span>
+                              <span><strong>{formatLimit(plan.maxChannels)}</strong> Connected Channels</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-700">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span><strong>{plan.maxContacts.toLocaleString()}</strong> Contacts</span>
+                              <span><strong>{formatLimit(plan.maxContacts)}</strong> Contacts</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-700">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span><strong>{plan.maxMonthlyMessages.toLocaleString()}</strong> Messages / mo</span>
+                              <span><strong>{formatLimit(plan.maxMonthlyMessages)}</strong> Messages / mo</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-700">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span><strong>{plan.maxMonthlyAiQueries.toLocaleString()}</strong> AI Queries / mo</span>
+                              <span><strong>{formatLimit(plan.maxMonthlyAiQueries)}</strong> AI Queries / mo</span>
                             </div>
+                            {plan.featureFlags &&
+                              PLAN_FEATURE_LABELS.filter(({ key }) => plan.featureFlags?.[key]).map(({ key, label }) => (
+                                <div key={key} className="flex items-center gap-2 text-gray-700">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>{label}</span>
+                                </div>
+                              ))}
                             {plan.features.map((f, idx) => (
                               <div key={idx} className="flex items-center gap-2 text-gray-600">
                                 <Sparkles className="w-3.5 h-3.5 text-primary-500 shrink-0" />
@@ -1294,6 +1449,11 @@ export const SettingsPage: React.FC = () => {
                     );
                   })}
                 </div>
+
+                {/* Billing country (decides the currency), tax ID and invoice name */}
+                <SubscriptionCard reloadKey={usageSummary.planId} onChanged={loadBilling} />
+
+                <BillingProfileCard onSaved={loadBilling} />
 
                 {/* Invoices & Billing History */}
                 <div className="pt-6 space-y-4">
@@ -1341,7 +1501,7 @@ export const SettingsPage: React.FC = () => {
                                   <Badge variant="purple">{inv.planName}</Badge>
                                 </td>
                                 <td className="px-5 py-3.5 font-semibold text-gray-900">
-                                  ${inv.amount.toLocaleString()} {inv.currency}
+                                  {formatMoney(inv.amount, inv.currency)}
                                 </td>
                                 <td className="px-5 py-3.5 capitalize text-gray-600">
                                   {inv.billingCycle}
@@ -1358,14 +1518,27 @@ export const SettingsPage: React.FC = () => {
                                   {new Date(inv.createdAt).toLocaleDateString()}
                                 </td>
                                 <td className="px-5 py-3.5 text-right">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setSelectedInvoiceForModal(inv)}
-                                    className="text-xs"
-                                  >
-                                    View Receipt
-                                  </Button>
+                                  <div className="flex justify-end gap-2">
+                                    {inv.amount > 0 && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDownloadInvoice(inv)}
+                                        disabled={downloadingInvoiceId === inv.id}
+                                        className="text-xs"
+                                      >
+                                        {downloadingInvoiceId === inv.id ? 'Preparing...' : 'PDF'}
+                                      </Button>
+                                    )}
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setSelectedInvoiceForModal(inv)}
+                                      className="text-xs"
+                                    >
+                                      View
+                                    </Button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1374,6 +1547,62 @@ export const SettingsPage: React.FC = () => {
                       </div>
                     )}
                   </Card>
+
+                  {creditNotes.length > 0 && (
+                    <>
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-gray-700" />
+                          Credit notes
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          Issued when an amount was credited: the unused time of a plan you upgraded from, or a refund.
+                        </p>
+                      </div>
+                      <Card>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-gray-50/80 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+                              <tr>
+                                <th className="px-5 py-3.5">Credit note #</th>
+                                <th className="px-5 py-3.5">Against invoice</th>
+                                <th className="px-5 py-3.5">Amount</th>
+                                <th className="px-5 py-3.5">Reason</th>
+                                <th className="px-5 py-3.5">Date</th>
+                                <th className="px-5 py-3.5 text-right">PDF</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {creditNotes.map((note) => (
+                                <tr key={note.id} className="hover:bg-gray-50/50 transition-colors">
+                                  <td className="px-5 py-3.5 font-mono font-semibold text-gray-900">{note.creditNoteNumber}</td>
+                                  <td className="px-5 py-3.5 font-mono text-gray-700">{note.invoiceNumber}</td>
+                                  <td className="px-5 py-3.5 font-semibold text-gray-900">
+                                    -{formatMoney(note.total, note.currency)}
+                                  </td>
+                                  <td className="px-5 py-3.5 text-gray-600 max-w-[220px] truncate" title={note.reason}>
+                                    {note.reason}
+                                  </td>
+                                  <td className="px-5 py-3.5 text-gray-500">{new Date(note.issuedAt).toLocaleDateString()}</td>
+                                  <td className="px-5 py-3.5 text-right">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleDownloadCreditNote(note)}
+                                      disabled={downloadingInvoiceId === note.id}
+                                      className="text-xs"
+                                    >
+                                      {downloadingInvoiceId === note.id ? 'Preparing...' : 'PDF'}
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    </>
+                  )}
                 </div>
               </div>
             </>
@@ -1728,6 +1957,19 @@ export const SettingsPage: React.FC = () => {
             const priceYearly = selectedPlanForUpgrade.priceYearly !== undefined ? selectedPlanForUpgrade.priceYearly : priceMonthly * 10;
             const currentAmount = billingCycle === 'yearly' ? priceYearly : priceMonthly;
             const isFree = currentAmount === 0;
+            const modalCurrency = selectedPlanForUpgrade.currency || billingCurrency;
+            const modalSavings = yearlySavingsPercent(priceMonthly, priceYearly);
+            const taxRate = usageSummary?.tax?.ratePercent ?? 0;
+            const taxLabel = usageSummary?.tax?.label ?? 'Tax';
+            const { taxAmount, total } = previewTax(currentAmount, taxRate);
+            // The server's quote for this plan and cycle (ignored while it is still loading or stale).
+            const quote =
+              upgradeQuote && upgradeQuote.planId === selectedPlanForUpgrade.id && upgradeQuote.billingCycle === billingCycle
+                ? upgradeQuote
+                : null;
+            const hasCredit = Boolean(quote?.credit);
+            const isBlocked = Boolean(quote?.blocked);
+            const payNow = quote ? quote.payable : total;
 
             return (
               <div className="space-y-5 text-xs">
@@ -1746,7 +1988,7 @@ export const SettingsPage: React.FC = () => {
                     >
                       <div className="flex justify-between items-center mb-1">
                         <span className="font-bold text-gray-900 text-sm">Monthly</span>
-                        <span className="font-bold text-gray-900">${priceMonthly}/mo</span>
+                        <span className="font-bold text-gray-900">{formatMoney(priceMonthly, modalCurrency, { compact: true })}/mo</span>
                       </div>
                       <p className="text-[11px] text-gray-500">Billed monthly, cancel anytime</p>
                     </button>
@@ -1760,14 +2002,18 @@ export const SettingsPage: React.FC = () => {
                           : 'border-gray-200 bg-white hover:border-gray-300'
                       }`}
                     >
-                      <span className="absolute -top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase">
-                        Save ~17%
-                      </span>
+                      {modalSavings > 0 && (
+                        <span className="absolute -top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase">
+                          Save ~{modalSavings}%
+                        </span>
+                      )}
                       <div className="flex justify-between items-center mb-1">
                         <span className="font-bold text-gray-900 text-sm">Annual</span>
-                        <span className="font-bold text-emerald-700">${priceYearly}/yr</span>
+                        <span className="font-bold text-emerald-700">{formatMoney(priceYearly, modalCurrency, { compact: true })}/yr</span>
                       </div>
-                      <p className="text-[11px] text-gray-500">2 months free (${(priceYearly / 12).toFixed(1)}/mo)</p>
+                      <p className="text-[11px] text-gray-500">
+                        {modalSavings > 0 ? `Save ${modalSavings}% · ` : ''}{formatMoney(priceYearly / 12, modalCurrency)}/mo
+                      </p>
                     </button>
                   </div>
                 </div>
@@ -1777,82 +2023,115 @@ export const SettingsPage: React.FC = () => {
                   <div className="font-semibold text-gray-900 flex items-center justify-between">
                     <span>Workspace Quota Entitlements:</span>
                     <span className="text-primary-700 font-bold text-sm">
-                      {isFree ? 'FREE' : `$${currentAmount} / ${billingCycle}`}
+                      {isFree ? 'FREE' : `${formatMoney(currentAmount, modalCurrency)} / ${billingCycle}`}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-gray-600 text-[11px]">
                     <div className="flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span><strong>{selectedPlanForUpgrade.maxChannels}</strong> Channels</span>
+                      <span><strong>{formatLimit(selectedPlanForUpgrade.maxChannels)}</strong> Channels</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span><strong>{selectedPlanForUpgrade.maxContacts.toLocaleString()}</strong> Contacts</span>
+                      <span><strong>{formatLimit(selectedPlanForUpgrade.maxContacts)}</strong> Contacts</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span><strong>{selectedPlanForUpgrade.maxMonthlyMessages.toLocaleString()}</strong> Msgs / mo</span>
+                      <span><strong>{formatLimit(selectedPlanForUpgrade.maxMonthlyMessages)}</strong> Msgs / mo</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span><strong>{selectedPlanForUpgrade.maxMonthlyAiQueries.toLocaleString()}</strong> AI Queries</span>
+                      <span><strong>{formatLimit(selectedPlanForUpgrade.maxMonthlyAiQueries)}</strong> AI Queries</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Gateway Selection (Only for paid plans) */}
-                {!isFree && (
-                  <div>
-                    <label className="block font-semibold text-gray-900 mb-2">Payment Gateway</label>
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedGateway('stripe')}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${
-                          selectedGateway === 'stripe'
-                            ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-500/20'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="font-bold text-gray-900 text-xs flex items-center gap-1">
-                          <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Stripe</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5">Cards & Global</p>
-                      </button>
+                {quote?.blocked && (
+                  <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-[11px] leading-relaxed">
+                    <p className="font-semibold text-xs">Not available right now</p>
+                    <p>{quote.blocked.message}</p>
+                    <p className="mt-1">
+                      Your current plan runs until <strong>{new Date(quote.blocked.activeUntil).toLocaleDateString()}</strong>.
+                    </p>
+                  </div>
+                )}
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedGateway('razorpay')}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${
-                          selectedGateway === 'razorpay'
-                            ? 'border-blue-500 bg-blue-50/50 ring-2 ring-blue-500/20'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="font-bold text-gray-900 text-xs flex items-center gap-1">
-                          <DollarSign className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Razorpay</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5">UPI & Netbanking</p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setSelectedGateway('sandbox')}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${
-                          selectedGateway === 'sandbox'
-                            ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="font-bold text-gray-900 text-xs flex items-center gap-1">
-                          <Zap className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Sandbox</span>
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-0.5">Instant Sim</p>
-                      </button>
+                {!isFree && taxAmount > 0 && (
+                  <div className="p-3 bg-white rounded-xl border border-gray-200 space-y-1 text-[11px]">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Subtotal</span>
+                      <span>{formatMoney(currentAmount, modalCurrency)}</span>
                     </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>
+                        {taxLabel} ({taxRate}%)
+                      </span>
+                      <span>{formatMoney(taxAmount, modalCurrency)}</span>
+                    </div>
+                    {quote?.credit ? (
+                      <>
+                        <div className="flex justify-between text-gray-700 border-t border-gray-100 pt-1">
+                          <span>Invoice total</span>
+                          <span>{formatMoney(total, modalCurrency)}</span>
+                        </div>
+                        <div className="flex justify-between text-emerald-700">
+                          <span>
+                            Credit for {quote.credit.unusedDays} unused day{quote.credit.unusedDays === 1 ? '' : 's'} of your
+                            current plan
+                          </span>
+                          <span>-{formatMoney(quote.credit.total, modalCurrency)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1">
+                          <span>Pay now</span>
+                          <span>{formatMoney(payNow, modalCurrency)}</span>
+                        </div>
+                        <p className="text-gray-500 pt-1">
+                          You get a new invoice for the full plan and a credit note for the unused time of your current plan
+                          (invoice {quote.credit.invoiceNumber}), both as PDFs by email.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="flex justify-between font-bold text-gray-900 border-t border-gray-100 pt-1">
+                        <span>Total today</span>
+                        <span>{formatMoney(total, modalCurrency)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!isFree && (
+                  <label className="flex items-start gap-2.5 p-3 rounded-xl border border-gray-200 bg-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      checked={autoRenew && !hasCredit}
+                      disabled={hasCredit}
+                      onChange={(e) => setAutoRenew(e.target.checked)}
+                    />
+                    <span className="text-[11px] text-gray-600 leading-relaxed">
+                      <span className="block font-semibold text-gray-900 text-xs">Renew automatically</span>
+                      {hasCredit
+                        ? 'An upgrade with credit is paid once. Turn automatic renewal on when this period ends.'
+                        : autoRenew
+                        ? `You are charged ${formatMoney(total, modalCurrency)} every ${
+                            billingCycle === 'yearly' ? 'year' : 'month'
+                          } until you cancel, which you can do any time from Settings.${
+                            modalCurrency === 'INR' ? ' You approve UPI AutoPay or a card mandate on the payment page.' : ''
+                          }`
+                        : 'Pay once for this period. The plan ends when it runs out and we remind you to renew.'}
+                    </span>
+                  </label>
+                )}
+
+                {/* Payment method: chosen by the server from the billing currency (India -> Razorpay, else Stripe) */}
+                {!isFree && (
+                  <div className="p-3 rounded-xl border border-gray-200 bg-white flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <p className="text-[11px] text-gray-600">
+                      {modalCurrency === 'INR'
+                        ? 'Pay securely in ₹ with UPI, netbanking or cards (Razorpay).'
+                        : 'Pay securely in your billing currency with a card (Stripe).'}
+                    </p>
                   </div>
                 )}
 
@@ -1867,7 +2146,7 @@ export const SettingsPage: React.FC = () => {
                   <Button
                     variant="primary"
                     onClick={handleStartCheckout}
-                    disabled={isCheckingOut}
+                    disabled={isCheckingOut || isBlocked}
                     className="flex items-center gap-1.5"
                   >
                     {isCheckingOut ? (
@@ -1876,7 +2155,7 @@ export const SettingsPage: React.FC = () => {
                       'Activate Free Tier'
                     ) : (
                       <>
-                        <span>Proceed to Pay ${currentAmount}</span>
+                        <span>Proceed to Pay {formatMoney(payNow, modalCurrency)}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
@@ -1908,9 +2187,35 @@ export const SettingsPage: React.FC = () => {
                   <span className="text-gray-500">Billing Cycle:</span>
                   <span className="font-semibold text-gray-800 capitalize">{checkoutSession.billingCycle}</span>
                 </div>
+                {checkoutSession.taxAmount > 0 && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Subtotal:</span>
+                      <span className="text-gray-800">{formatMoney(checkoutSession.subtotal, checkoutSession.currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">
+                        {checkoutSession.taxLabel ?? 'Tax'} ({checkoutSession.taxRate}%):
+                      </span>
+                      <span className="text-gray-800">{formatMoney(checkoutSession.taxAmount, checkoutSession.currency)}</span>
+                    </div>
+                  </>
+                )}
+                {checkoutSession.credit && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Invoice total:</span>
+                      <span className="text-gray-800">{formatMoney(checkoutSession.invoiceTotal, checkoutSession.currency)}</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700">
+                      <span>Credit (unused time of your current plan):</span>
+                      <span>-{formatMoney(checkoutSession.credit.total, checkoutSession.currency)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-500">Total Due:</span>
-                  <span className="font-bold text-gray-900">${checkoutSession.amount} {checkoutSession.currency}</span>
+                  <span className="font-bold text-gray-900">{formatMoney(checkoutSession.amount, checkoutSession.currency)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Session ID:</span>
@@ -1936,8 +2241,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
               )}
 
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
-                <strong>Verification Note:</strong> Once you complete payment on the gateway, click the button below to verify transaction and apply quota upgrades immediately.
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px] flex items-start gap-2">
+                <Spinner size="sm" />
+                <p>
+                  <strong>Waiting for your payment.</strong> Complete it in the payment tab. This page updates by itself as soon as
+                  the payment is confirmed. If you close this window, your plan still activates once the payment goes through.
+                </p>
               </div>
 
               <div className="pt-3 flex justify-between items-center border-t border-gray-100">
@@ -1950,16 +2259,16 @@ export const SettingsPage: React.FC = () => {
                 </Button>
                 <Button
                   variant="primary"
-                  onClick={() => handleVerifyGatewayPayment()}
+                  onClick={() => checkPaymentStatus(checkoutSession.sessionId)}
                   disabled={isVerifyingPayment}
                   className="flex items-center gap-1.5"
                 >
                   {isVerifyingPayment ? (
-                    'Verifying Payment...'
+                    'Checking...'
                   ) : (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                      <span>Verify Payment & Activate</span>
+                      <span>Check payment now</span>
                     </>
                   )}
                 </Button>
@@ -1993,8 +2302,15 @@ export const SettingsPage: React.FC = () => {
                     <div>
                       <span className="text-gray-500 block">Amount Paid:</span>
                       <span className="font-bold text-gray-900">
-                        ${paymentSuccessResult.payment.amount} {paymentSuccessResult.payment.currency}
+                        {formatMoney(paymentSuccessResult.payment.amount, paymentSuccessResult.payment.currency)}
                       </span>
+                      {(paymentSuccessResult.payment.taxAmount ?? 0) > 0 && (
+                        <span className="block text-[10px] text-gray-500">
+                          {formatMoney(paymentSuccessResult.payment.subtotal ?? 0, paymentSuccessResult.payment.currency)} +{' '}
+                          {paymentSuccessResult.payment.taxLabel ?? 'Tax'}{' '}
+                          {formatMoney(paymentSuccessResult.payment.taxAmount ?? 0, paymentSuccessResult.payment.currency)}
+                        </span>
+                      )}
                     </div>
                     <div>
                       <span className="text-gray-500 block">Billing Cycle:</span>
@@ -2018,6 +2334,13 @@ export const SettingsPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {completedAutoRenew && (
+                <p className="text-[11px] text-gray-500 text-center">
+                  This plan renews automatically. You can cancel the renewal any time under Settings → Usage &amp; Plans →
+                  Your subscription.
+                </p>
               )}
 
               <div className="pt-3 flex justify-end border-t border-gray-100">
@@ -2142,8 +2465,32 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-gray-400 block text-[10px] uppercase">Amount Paid</span>
-                  <span className="font-bold text-gray-900">${selectedInvoiceForModal.amount} {selectedInvoiceForModal.currency}</span>
+                  <span className="font-bold text-gray-900">{formatMoney(selectedInvoiceForModal.amount, selectedInvoiceForModal.currency)}</span>
+                  {(selectedInvoiceForModal.taxAmount ?? 0) > 0 && (
+                    <span className="block text-[10px] text-gray-500">
+                      {formatMoney(selectedInvoiceForModal.subtotal ?? 0, selectedInvoiceForModal.currency)}
+                      {(selectedInvoiceForModal.cgstAmount ?? 0) > 0 &&
+                        ` + CGST ${formatMoney(selectedInvoiceForModal.cgstAmount ?? 0, selectedInvoiceForModal.currency)} + SGST ${formatMoney(selectedInvoiceForModal.sgstAmount ?? 0, selectedInvoiceForModal.currency)}`}
+                      {(selectedInvoiceForModal.igstAmount ?? 0) > 0 &&
+                        ` + IGST ${formatMoney(selectedInvoiceForModal.igstAmount ?? 0, selectedInvoiceForModal.currency)}`}
+                      {(selectedInvoiceForModal.cgstAmount ?? 0) === 0 &&
+                        (selectedInvoiceForModal.igstAmount ?? 0) === 0 &&
+                        ` + ${selectedInvoiceForModal.taxLabel ?? 'Tax'} (${selectedInvoiceForModal.taxRate}%) ${formatMoney(selectedInvoiceForModal.taxAmount ?? 0, selectedInvoiceForModal.currency)}`}
+                    </span>
+                  )}
                 </div>
+                {selectedInvoiceForModal.sellerTaxId && (
+                  <div>
+                    <span className="text-gray-400 block text-[10px] uppercase">Seller GSTIN</span>
+                    <span className="font-mono text-gray-800">{selectedInvoiceForModal.sellerTaxId}</span>
+                  </div>
+                )}
+                {selectedInvoiceForModal.buyerTaxId && (
+                  <div>
+                    <span className="text-gray-400 block text-[10px] uppercase">Your GSTIN</span>
+                    <span className="font-mono text-gray-800">{selectedInvoiceForModal.buyerTaxId}</span>
+                  </div>
+                )}
                 <div>
                   <span className="text-gray-400 block text-[10px] uppercase">Billing Cycle</span>
                   <span className="font-semibold text-gray-800 capitalize">{selectedInvoiceForModal.billingCycle}</span>
@@ -2173,6 +2520,15 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="pt-2 flex justify-end gap-2">
+              {selectedInvoiceForModal.amount > 0 && (
+                <Button
+                  variant="primary"
+                  onClick={() => handleDownloadInvoice(selectedInvoiceForModal)}
+                  disabled={downloadingInvoiceId === selectedInvoiceForModal.id}
+                >
+                  {downloadingInvoiceId === selectedInvoiceForModal.id ? 'Preparing...' : 'Download PDF'}
+                </Button>
+              )}
               <Button variant="secondary" onClick={() => setSelectedInvoiceForModal(null)}>
                 Close
               </Button>

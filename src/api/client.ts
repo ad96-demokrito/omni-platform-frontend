@@ -7,6 +7,28 @@ interface ApiRequestOptions extends RequestInit {
   responseType?: 'json' | 'blob';
 }
 
+/**
+ * An error answer from the API. It is still an `Error` whose message is safe to show; `code` and `details` let a
+ * screen react to specific cases, for example `PLAN_LIMIT_REACHED` or `FEATURE_NOT_IN_PLAN` (HTTP 402).
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly details: Record<string, unknown>;
+
+  constructor(message: string, status: number, code?: string, details: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/** True when the plan (not the request) is why it failed: the screen should offer an upgrade. */
+export const isPlanBlockedError = (err: unknown): err is ApiError =>
+  err instanceof ApiError && (err.code === 'PLAN_LIMIT_REACHED' || err.code === 'FEATURE_NOT_IN_PLAN');
+
 class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -94,13 +116,18 @@ class ApiClient {
       let errorMessage = response.status === 413
         ? 'The file is too large for the server to accept. Try a smaller file.'
         : `HTTP ${response.status}`;
+      let errorCode: string | undefined;
+      let errorDetails: Record<string, unknown> = {};
       try {
         const errorData = await response.json();
         errorMessage = errorData.error || errorData.message || errorMessage;
+        if (typeof errorData.code === 'string') errorCode = errorData.code;
+        const { error: _error, message: _message, code: _code, requestId: _requestId, ...rest } = errorData;
+        errorDetails = rest;
       } catch {
         // If parsing error JSON fails, use default message
       }
-      throw new Error(errorMessage);
+      throw new ApiError(errorMessage, response.status, errorCode, errorDetails);
     }
 
     // Handle 204 No Content

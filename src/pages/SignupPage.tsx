@@ -5,12 +5,21 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
+import { countryOptions } from '../utils/countries';
+import { guessCountryCode } from '../utils/money';
+
+const COUNTRY_OPTIONS = countryOptions();
 
 export const SignupPage: React.FC = () => {
   const [tenantName, setTenantName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  // Decides the currency plans are priced in (India -> INR, otherwise USD); a guess the user can change.
+  const [country, setCountry] = useState<string>(() => {
+    const guess = guessCountryCode();
+    return guess && COUNTRY_OPTIONS.some((c) => c.code === guess) ? guess : '';
+  });
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{
@@ -18,6 +27,7 @@ export const SignupPage: React.FC = () => {
     email?: string;
     password?: string;
     confirmPassword?: string;
+    country?: string;
   }>({});
 
   const { signup } = useAuth();
@@ -32,6 +42,7 @@ export const SignupPage: React.FC = () => {
     if (!password) newErrors.password = 'Password is required';
     else if (password.length < 8) newErrors.password = 'Password must be at least 8 characters';
     if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
+    if (!country) newErrors.country = 'Select your country';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -42,7 +53,7 @@ export const SignupPage: React.FC = () => {
 
     setIsLoading(true);
     try {
-      await signup(tenantName, email, password);
+      await signup(tenantName, email, password, country);
       showToast('Account created successfully! Welcome to Omni Platform', 'success');
       navigate('/');
     } catch (error) {
@@ -131,6 +142,30 @@ export const SignupPage: React.FC = () => {
               leftIcon={<Mail className="w-4 h-4" />}
               autoComplete="email"
             />
+
+            <div className="space-y-1">
+              <label htmlFor="signup-country" className="block text-sm font-medium text-gray-700">
+                Country
+              </label>
+              <select
+                id="signup-country"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">Select your country</option>
+                {COUNTRY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {errors.country ? (
+                <p className="text-xs text-rose-600">{errors.country}</p>
+              ) : (
+                <p className="text-xs text-gray-500">Used for billing: India pays in ₹ (INR), everywhere else in $ (USD).</p>
+              )}
+            </div>
 
             <Input
               label="Password"

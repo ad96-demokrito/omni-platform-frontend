@@ -74,11 +74,16 @@ import type {
   PublicWidgetConfig,
   VisitorSessionInitResponse,
   CarouselSendCard,
+  BillingProfile,
+  CheckoutStatusResponse,
+  SubscriptionSummary,
+  UpgradeQuote,
+  CreditNoteRecord,
 } from '../types';
 
 // ==================== AUTH API ====================
 export const authApi = {
-  signup: (data: { tenantName: string; email: string; password: string }) =>
+  signup: (data: { tenantName: string; email: string; password: string; country?: string }) =>
     apiClient.post<AuthResponse>('/auth/signup', data),
 
   login: (data: { email: string; password: string }) =>
@@ -604,20 +609,50 @@ export const billingApi = {
   getInvoices: () =>
     apiClient.get<{ invoices: InvoiceRecord[] }>('/billing/invoices'),
 
-  createCheckoutSession: (data: {
-    planId: string;
-    billingCycle?: 'monthly' | 'yearly';
-    gateway?: 'stripe' | 'razorpay' | 'sandbox';
-    successUrl?: string;
-    cancelUrl?: string;
-  }) => apiClient.post<CheckoutSessionResponse>('/billing/checkout', data),
+  /** What an upgrade to `planId` would cost right now, with the credit for the unused time of the current plan. */
+  getUpgradeQuote: (planId: string, billingCycle: 'monthly' | 'yearly') =>
+    apiClient.get<UpgradeQuote>('/billing/upgrade-quote', { planId, billingCycle }),
 
-  verifyPayment: (data: {
-    planId: string;
-    billingCycle?: 'monthly' | 'yearly';
-    gateway?: 'stripe' | 'razorpay' | 'sandbox';
-    paymentReference: string;
-  }) => apiClient.post<SubscriptionPaymentResult>('/billing/verify-payment', data),
+  getCreditNotes: () => apiClient.get<{ creditNotes: CreditNoteRecord[] }>('/billing/credit-notes'),
+
+  downloadCreditNotePdf: (creditNoteId: string) =>
+    apiClient.get<Blob>(`/billing/credit-notes/${creditNoteId}/pdf`, undefined, { responseType: 'blob' }),
+
+  /** The invoice as a PDF file. */
+  downloadInvoicePdf: (invoiceId: string) =>
+    apiClient.get<Blob>(`/billing/invoices/${invoiceId}/pdf`, undefined, { responseType: 'blob' }),
+
+  getProfile: () => apiClient.get<BillingProfile>('/billing/profile'),
+
+  updateProfile: (data: {
+    country?: string;
+    taxId?: string;
+    name?: string;
+    address?: Record<string, string> | null;
+    stateCode?: string | null;
+  }) => apiClient.put<BillingProfile>('/billing/profile', data),
+
+  /** The server picks the price, tax and payment provider; the body only says which plan and cycle. */
+  createCheckoutSession: (data: { planId: string; billingCycle?: 'monthly' | 'yearly'; autoRenew?: boolean }) =>
+    apiClient.post<CheckoutSessionResponse>('/billing/checkout', data),
+
+  /** The auto-renewing subscription, or null when the workspace has none. */
+  getSubscription: () => apiClient.get<{ subscription: SubscriptionSummary | null }>('/billing/subscription'),
+
+  /** Stops renewals; the plan stays active until the period already paid for ends. */
+  cancelSubscription: () => apiClient.post<{ subscription: SubscriptionSummary }>('/billing/subscription/cancel', {}),
+
+  /** URL of Stripe's hosted page for changing the card. */
+  openBillingPortal: () => apiClient.post<{ url: string }>('/billing/subscription/portal', {}),
+
+  /** Development only (BILLING_SANDBOX=true): simulate the next renewal / a failed renewal. */
+  sandboxRenew: () => apiClient.post<{ subscription: SubscriptionSummary }>('/billing/subscription/sandbox/renew', {}),
+  sandboxFailRenewal: () =>
+    apiClient.post<{ subscription: SubscriptionSummary }>('/billing/subscription/sandbox/fail', {}),
+
+  /** Asks the server (which asks the payment provider) whether a checkout was paid; activates the plan if so. */
+  getCheckoutStatus: (sessionId: string) =>
+    apiClient.get<CheckoutStatusResponse>(`/billing/checkout/${encodeURIComponent(sessionId)}/status`),
 
   updatePlan: (planId: string) =>
     apiClient.post<{ message: string; plan: any }>('/billing/plan', { planId }),
